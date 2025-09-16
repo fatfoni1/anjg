@@ -212,11 +212,33 @@ async def run_executor(cfg: dict) -> int:
         print(f"[WATCHER] Gagal jalankan executor: {e}")
         return 1
 
+async def ensure_gologin_prepared(cfg: dict) -> None:
+    """Pastikan GoLogin aktif dan CDP siap tanpa menutupnya (prepare-only)."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable,
+            os.path.join(os.path.dirname(__file__), 'start_gologin_and_bot.py'),
+            '--prepare-only',
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        if stdout:
+            print(stdout.decode(errors='ignore'))
+        if stderr:
+            print(stderr.decode(errors='ignore'))
+        print(f"[WATCHER] GoLogin prepare-only selesai dengan kode: {proc.returncode}")
+    except Exception as e:
+        print(f"[WATCHER] Gagal prepare GoLogin: {e}")
+
 
 async def watcher_main():
     cfg = load_config()
     target_url = cfg.get('target_url') or TARGET_URL_DEFAULT
     headless_mode = bool(cfg.get('headless', False))
+
+    # 0) Pastikan GoLogin aktif 24/7 (prepare-only)
+    await ensure_gologin_prepared(cfg)
 
     while True:  # nonstop loop
         # 1) Ambil token & validasi/recovery

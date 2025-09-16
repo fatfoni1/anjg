@@ -172,6 +172,71 @@ def update_bot_config(port):
         f.truncate()
     logging.info("[Config] File konfigurasi berhasil diupdate.")
 
+
+def find_existing_cdp_port_by_cmdline() -> Optional[int]:
+    """Coba temukan port CDP yang sudah aktif dengan membaca cmdline proses (tanpa membuka/tutup GoLogin)."""
+    try:
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            try:
+                name = (proc.info.get('name') or '').lower()
+                cmdline = ' '.join(proc.info.get('cmdline') or []).lower()
+                if not (('gologin' in name or 'chrome' in name or 'chromium' in name) or ('gologin' in cmdline or '--remote-debugging-port' in cmdline)):
+                    continue
+                m = re.search(r"--remote-debugging-port=(\d+)", cmdline)
+                if m:
+                    port = int(m.group(1))
+                    if port > 0:
+                        logging.info(f"[CDP] Ditemukan port DevTools dari proses: {port}")
+                        return port
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                continue
+    except Exception as e:
+        logging.warning(f"[CDP] Gagal mencari port CDP via cmdline: {e}")
+    return None
+
+def find_existing_cdp_port_by_net() -> Optional[int]:
+    """Coba temukan port CDP dengan melihat koneksi LISTEN milik proses chrome/chromium/gologin lalu probe /json/version."""
+    try:
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            try:
+                name = (proc.info.get('name') or '').lower()
+                cmdline = ' '.join(proc.info.get('cmdline') or []).lower()
+                if not (('gologin' in name or 'chrome' in name or 'chromium' in name) or ('gologin' in cmdline or '--remote-debugging-port' in cmdline)):
+                    continue
+                conns = []
+                try:
+                    conns = proc.net_connections(kind='inet')
+                except Exception:
+                    conns = []
+                for c in conns:
+                    try:
+                        if not c.laddr:
+                            continue
+                        ip = getattr(c.laddr, 'ip', None) or (c.laddr[0] if isinstance(c.laddr, tuple) and len(c.laddr) > 0 else None)
+                        port = getattr(c.laddr, 'port', None) or (c.laddr[1] if isinstance(c.laddr, tuple) and len(c.laddr) > 1 else None)
+                        status = getattr(c, 'status', '')
+                        if not port:
+                            continue
+                        if status and str(status).upper() != 'LISTEN':
+                            continue
+                        if ip and ip not in ('127.0.0.1', '0.0.0.0', '::1'):
+                            continue
+                        # Probe cepat
+                        try:
+                            r = requests.get(f"http://127.0.0.1:{port}/json/version", timeout=0.5)
+                            if r.ok:
+                                logging.info(f"[CDP] Port DevTools terverifikasi via net/probe: {port}")
+                                return int(port)
+                        except Exception:
+                            pass
+                    except Exception:
+                        continue
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                continue
+    except Exception as e:
+        logging.warning(f"[CDP] Gagal mencari port CDP via net: {e}")
+    return None
+
 def _kill_processes_for_port_by_net(port: int, grace_seconds: float = 2.0) -> tuple[bool, str]:
     """Bunuh proses yang menggunakan port tertentu via net_connections sebagai fallback."""
     try:
@@ -346,7 +411,7 @@ def run_bot_with_retry(max_duration_minutes=2):
     max_duration_seconds = max_duration_minutes * 60
     attempt = 1
     
-    logging.info(f"[Bot] ⏰ MEMULAI TIMER 2 MENIT - GoLogin akan DIPAKSA TUTUP setelah 2 menit!")
+    logging.info(f"[Bot] ⏰ MEMULAI TIMER 2 MENIT - Eksekusi cepat hingga 2 menit, tanpa menutup GoLogin.")
     logging.info(f"[Bot] Memulai eksekusi dengan retry maksimal {max_duration_minutes} menit...")
     
     while True:
@@ -355,7 +420,7 @@ def run_bot_with_retry(max_duration_minutes=2):
         
         # PAKSA STOP setelah 2 menit - tidak peduli status apapun
         if elapsed_time >= max_duration_seconds:
-            logging.info(f"[Bot] ⏰ WAKTU 2 MENIT HABIS! PAKSA STOP dan TUTUP GoLogin.")
+            logging.info(f"[Bot] ⏰ WAKTU 2 MENIT HABIS! Menghentikan percobaan eksekusi cepat (GoLogin tetap berjalan).")
             logging.info(f"[Bot] Total percobaan: {attempt-1}, Total waktu: {elapsed_time:.1f} detik")
             break
             
@@ -409,6 +474,7 @@ def main():
     """Main function"""
     gologin_api_token = config.get("gologin_api_token")
     gologin_profile_name = config.get("gologin_profile_name")
+    prepare_only = ("--prepare-only" in sys.argv)
 
     if not gologin_api_token or not gologin_profile_name:
         logging.error("[Config] ERROR: 'gologin_api_token' atau 'gologin_profile_name' tidak ditemukan di bot_config.json")
@@ -417,66 +483,108 @@ def main():
     # Reuse CDP yang sudah aktif bila memungkinkan
     cdp_url = config.get('cdp_url')
     reuse_port: Optional[int] = None
-    # Inline cek DevTools agar tidak tergantung fungsi utilitas
-    try:
-        if cdp_url:
-            probe = cdp_url.rstrip("/") + "/json/version"
-            r = requests.get(probe, timeout=3)
-            if r.ok:
-                try:
-                    reuse_port = int(cdp_url.rsplit(":", 1)[1])
-                except Exception:
-                    reuse_port = None
-    except Exception:
-        reuse_port = None
+    # Gunakan cdp_url yang sudah ada TANPA memulai ulang profil
+    if cdp_url:
+        try:
+            reuse_port = int(cdp_url.rsplit(":", 1)[1])
+        except Exception:
+            reuse_port = None
     if reuse_port:
-        logging.info(f"[CDP] Detected active DevTools at {cdp_url}, reuse this session (port {reuse_port}).")
+        logging.info(f"[CDP] Will reuse DevTools at {cdp_url} (port {reuse_port}) without restarting GoLogin.")
 
-    # STEP 1: Mulai profil GoLogin
+    # STEP 1: Tentukan port CDP TANPA restart kecuali pada prepare-only
     started_new = False
     port: Optional[str] = None
     profile_id = get_profile_id(gologin_api_token, gologin_profile_name)
-    if not reuse_port:
-        if profile_id:
-            port = start_gologin_profile(gologin_api_token, profile_id)
-            if not port:
-                logging.error("[GoLogin] Tidak bisa memulai profil. Keluar.")
-                sys.exit(2)
-            started_new = True
+
+    if reuse_port:
+        port = str(reuse_port)
+        logging.info(f"[CDP] Reuse port dari config: {port}")
+    else:
+        # Coba deteksi port CDP yang sudah aktif dari proses
+        detected = find_existing_cdp_port_by_cmdline()
+        if not detected:
+            detected = find_existing_cdp_port_by_net()
+        if detected:
+            port = str(detected)
             update_bot_config(port)
         else:
-            logging.error("[GoLogin] Profil tidak ditemukan. Keluar.")
-            sys.exit(2)
-    else:
-        # Ketika reuse, set port dari cdp_url
-        port = str(reuse_port)
+            if prepare_only:
+                # HANYA di prepare-only: boleh memulai profil jika belum ada CDP aktif
+                if profile_id:
+                    port = start_gologin_profile(gologin_api_token, profile_id)
+                    if not port:
+                        logging.error("[GoLogin] Tidak bisa memulai profil pada prepare-only. Keluar.")
+                        sys.exit(2)
+                    started_new = True
+                    update_bot_config(port)
+                else:
+                    logging.error("[GoLogin] Profil tidak ditemukan pada prepare-only. Keluar.")
+                    sys.exit(2)
+            else:
+                # Pada eksekusi (bukan prepare): JANGAN memulai profil baru.
+                logging.error("[CDP] Tidak menemukan CDP aktif untuk dieksekusi dan dilarang memulai ulang pada fase eksekusi.")
+                sys.exit(2)
 
-    # STEP 2: Verifikasi CDP endpoint UP
-    try:
-        probe = f"http://127.0.0.1:{port}/json/version"
-        logging.info(f"[CDP] Memeriksa DevTools endpoint: {probe}")
-        r = requests.get(probe, timeout=5)
-        if not r.ok:
-            logging.error(f"[CDP] Endpoint DevTools belum siap (status {r.status_code}). Batalkan eksekusi bot.")
+    # STEP 2: Verifikasi CDP endpoint UP (tanpa memulai ulang profil jika gagal)
+    probe = f"http://127.0.0.1:{port}/json/version"
+    logging.info(f"[CDP] Memeriksa DevTools endpoint: {probe}")
+    ok = False
+    for attempt in range(1, 6):  # retry sampai 5x
+        try:
+            r = requests.get(probe, timeout=3)
+            if r.ok:
+                ok = True
+                break
+            else:
+                logging.warning(f"[CDP] Endpoint belum siap (status {r.status_code}) percobaan {attempt}/5")
+        except Exception as e:
+            logging.warning(f"[CDP] Gagal hubungi DevTools percobaan {attempt}/5: {e}")
+        time.sleep(1)
+    if not ok:
+        # Coba fallback deteksi port dari proses lalu re-probe sekali lagi
+        fallback = find_existing_cdp_port_by_cmdline()
+        if not fallback:
+            fallback = find_existing_cdp_port_by_net()
+        if fallback and str(fallback) != str(port):
+            logging.info(f"[CDP] Fallback ke port terdeteksi: {fallback}")
+            port = str(fallback)
+            update_bot_config(port)
+            # Re-probe
+            probe = f"http://127.0.0.1:{port}/json/version"
+            logging.info(f"[CDP] Re-probe DevTools endpoint: {probe}")
+            try:
+                r = requests.get(probe, timeout=3)
+                ok = bool(r.ok)
+            except Exception:
+                ok = False
+        if not ok and prepare_only:
+            # Terakhir: pada prepare-only boleh memulai profil agar CDP aktif
+            if profile_id:
+                port = start_gologin_profile(gologin_api_token, profile_id)
+                if not port:
+                    logging.error("[CDP] Gagal memulai profil pada prepare-only setelah fallback. Keluar.")
+                    sys.exit(2)
+                update_bot_config(port)
+                ok = True  # anggap siap; verifikasi akan dilakukan berikutnya
+            else:
+                logging.error("[CDP] Profil tidak ditemukan pada prepare-only setelah fallback. Keluar.")
+                sys.exit(2)
+        if not ok:
+            logging.error("[CDP] Endpoint DevTools tidak siap. Tidak akan memulai ulang GoLogin pada fase eksekusi. Keluar.")
             sys.exit(2)
-    except Exception as e:
-        logging.error(f"[CDP] Tidak dapat menghubungi DevTools di port {port}: {e}")
-        sys.exit(2)
+
+    if prepare_only:
+        logging.info("[Prepare] GoLogin aktif dan CDP siap. Keluar (prepare-only).")
+        sys.exit(0)
 
     # STEP 3: Jalankan bot utama dengan sistem retry 2 menit
     logging.info("\n[Bot] Menjalankan skrip bot utama dengan sistem retry...")
     rc, success = run_bot_with_retry(max_duration_minutes=2)
-    
-    # STEP 4: Selalu hentikan profil setelah 2 menit, baik sukses maupun tidak
     if success:
-        logging.info("[GoLogin] ✅ Bot berhasil join dalam waktu 2 menit → hentikan profil dan kembali ke watcher.")
+        logging.info("[GoLogin] ✅ Bot selesai. Profil GoLogin tetap berjalan 24/7.")
     else:
-        logging.info("[GoLogin] ⏰ Waktu 2 menit habis, bot belum berhasil join → hentikan profil dan kembali ke watcher.")
-    
-    # Hentikan profil GoLogin
-    ok, msg = stop_gologin_profile(gologin_api_token, profile_id, port)
-    logging.info(("✅ " if ok else "❌ ") + msg)
-
+        logging.info("[GoLogin] ⏰ Bot selesai/timed out. Profil GoLogin tetap berjalan 24/7.")
     sys.exit(rc)
 
 if __name__ == "__main__":

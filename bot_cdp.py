@@ -292,8 +292,8 @@ async def page_reload_if_needed(page, last_reload_ts):
         for retry in range(max_retries):
             try:
                 print(f"[RELOAD] Percobaan reload #{retry + 1}")
-                await page.goto(TARGET_URL, wait_until="domcontentloaded", timeout=30000)
-                print(f"[LOAD] {TARGET_URL} berhasil dimuat")
+                await page.reload(wait_until="domcontentloaded", timeout=30000)
+                print(f"[LOAD] Reload berhasil dimuat")
                 
                 # Tunggu sebentar untuk memastikan halaman fully loaded
                 await asyncio.sleep(3)
@@ -303,7 +303,7 @@ async def page_reload_if_needed(page, last_reload_ts):
                 if final_url.startswith("about:blank") or "chrome-error://" in final_url:
                     print("[RELOAD] Halaman masih blank setelah reload, coba lagi...")
                     await asyncio.sleep(5)
-                    await page.goto(TARGET_URL, wait_until="networkidle", timeout=30000)
+                    await page.reload(wait_until="networkidle", timeout=30000)
                     await asyncio.sleep(2)
                 
                 # Test apakah page responsif
@@ -1269,6 +1269,122 @@ async def refresh_page_and_click_rain(page):
         await send_telegram_log(f"❌ Error saat refresh dan klik rain: {e}", "ERROR")
         return False
 
+async def close_info_modal_if_present(page):
+    """Tutup dialog informasi Rain jika muncul dengan klik di luar/backdrop/ESC."""
+    try:
+        # Deteksi konten dialog
+        dlg = page.locator('.MuiDialogContent-root')
+        if await dlg.count() > 0:
+            # Coba klik backdrop Material-UI
+            try:
+                back = page.locator('.MuiBackdrop-root').first
+                if await back.count() > 0:
+                    await back.click(force=True)
+                    await asyncio.sleep(0.2)
+            except Exception:
+                pass
+            # Coba tekan Escape
+            try:
+                await page.keyboard.press('Escape')
+            except Exception:
+                pass
+            # Coba klik koordinat kecil di pojok (di luar dialog)
+            try:
+                await page.mouse.click(5, 5)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+async def click_rain_with_30s_retry(page, max_attempts: int = 4) -> bool:
+    """Klik Rain lalu tunggu maksimal 30 detik untuk notifikasi sukses/already.
+    Jika tidak muncul, reload dan ulangi hingga max_attempts. Juga auto-handle checkbox.
+    Return True jika sukses/already, False jika gagal semua percobaan.
+    """
+    async def try_click_rain_once_local() -> bool:
+        # Coba selector prioritas
+        sel = await detect_active(page)
+        if sel:
+            return await click_join(page, sel)
+        # Fallback berbasis teks
+        for fs in [
+            "button:has-text('Join now')",
+            "button:has-text('Join')",
+            "button:has-text('Rain')",
+            "button:has-text('Enter')",
+        ]:
+            try:
+                if await page.locator(fs).count() > 0:
+                    btn = page.locator(fs).first
+                    try:
+                        await btn.scroll_into_view_if_needed()
+                    except Exception:
+                        pass
+                    try:
+                        await btn.click()
+                        print(f"[CLICK] Klik fallback tombol: {fs}")
+                        return True
+                    except Exception as e:
+                        print(f"[CLICK] Gagal klik fallback {fs}: {e}")
+                        continue
+            except Exception:
+                continue
+        return False
+
+    for attempt in range(1, max_attempts + 1):
+        print(f"[FAST-30S] Attempt {attempt}/{max_attempts}: klik Rain dan tunggu 30s untuk notifikasi…")
+        # Tutup dialog info jika muncul
+        await close_info_modal_if_present(page)
+
+        # Klik Rain
+        clicked = await try_click_rain_once_local()
+        if not clicked:
+            print("[FAST-30S] Tombol Rain tidak ditemukan pada attempt ini → reload…")
+            try:
+                await page.reload(wait_until='networkidle')
+                await asyncio.sleep(2)
+            except Exception:
+                pass
+            continue
+
+        # Start scanner yang juga auto-klik checkbox saat ditemukan
+        task = asyncio.create_task(continuous_success_scanner(page))
+        result = None
+        try:
+            result = await asyncio.wait_for(task, timeout=30)
+        except asyncio.TimeoutError:
+            try:
+                task.cancel()
+            except Exception:
+                pass
+            result = None
+        except Exception as e:
+            print(f"[FAST-30S] Error scanner: {e}")
+            result = None
+
+        if result in ("success", "already"):
+            # Kirim notifikasi
+            if telegram:
+                try:
+                    if result == 'success':
+                        await telegram.send_message("🎉 <b>SUKSES JOIN RAIN!</b>\n\nKonfirmasi: <i>Successfully joined rain!</i>")
+                    else:
+                        await telegram.send_message("ℹ️ <b>ALREADY JOINED</b>\n\nYou have already entered this rain!")
+                except Exception:
+                    pass
+            _save_fast_result('success')
+            return True
+
+        # Tidak ada hasil dalam 30 detik → reload dan coba lagi
+        print("[FAST-30S] Tidak ada notifikasi dalam 30 detik → reload dan retry…")
+        try:
+            await page.reload(wait_until='networkidle')
+            await asyncio.sleep(2)
+        except Exception:
+            pass
+
+    return False
+
 async def handle_turnstile_challenge(page):
     """Wrapper untuk handle_turnstile_challenge_with_refresh_retry dengan fallback ke metode lama"""
     try:
@@ -1468,9 +1584,69 @@ async def main():
             os._exit(3)
 
         try:
-            ctx = browser.contexts[0] if browser.contexts else await browser.new_context()
-            page = await ctx.new_page()
-            print("[BOOT] Page berhasil dibuat")
+            # Gunakan context & page yang SUDAH ADA dari GoLogin. Dilarang membuat tab baru.
+            if not browser.contexts:
+                print("[BOOT] ERROR: Tidak ada context aktif dari GoLogin. Kebijakan melarang membuat context/tab baru.")
+                import os as _os
+                _os._exit(3)
+            ctx = browser.contexts[0]
+
+            # Anti-tab-baru: injeksi script agar window.open/target=_blank tetap di tab yang sama
+            try:
+                await ctx.add_init_script(
+                    """
+                    (() => {
+                        try {
+                            // Paksa window.open tetap di tab yang sama
+                            const _open = window.open;
+                            window.open = function(url, target, features){
+                                try { if (url) { location.href = url; } } catch(e) {}
+                                return window;
+                            };
+                            // Ubah semua link target=_blank menjadi _self (awal + dynamic)
+                            const patchLinks = (root) => {
+                                try {
+                                    const list = (root || document).querySelectorAll('a[target="_blank"]');
+                                    for (const a of list) { a.setAttribute('target','_self'); }
+                                } catch(e) {}
+                            };
+                            document.addEventListener('click', (e) => {
+                                const a = e.target && e.target.closest ? e.target.closest('a[target="_blank"]') : null;
+                                if (a) { a.setAttribute('target','_self'); }
+                            }, true);
+                            new MutationObserver(muts => {
+                                muts.forEach(m => {
+                                    m.addedNodes && m.addedNodes.forEach(n => {
+                                        if (n && n.nodeType === 1) { patchLinks(n); }
+                                    });
+                                });
+                            }).observe(document.documentElement, {childList:true, subtree:true});
+                            // Patch awal
+                            document.addEventListener('DOMContentLoaded', () => patchLinks(document));
+                            patchLinks(document);
+                        } catch (e) {}
+                    })();
+                    """
+                )
+            except Exception:
+                pass
+
+            # Ambil page yang sudah ada; JANGAN membuat new_page
+            pages = ctx.pages if hasattr(ctx, 'pages') else []
+            if not pages:
+                print("[BOOT] ERROR: Tidak ditemukan tab aktif pada GoLogin. Kebijakan melarang membuat tab baru.")
+                import os as _os
+                _os._exit(3)
+            page = pages[0]
+
+            # Penjaga terakhir: jika ada popup/tab baru muncul, tutup segera
+            try:
+                ctx.on('page', lambda p: asyncio.create_task(p.close()))
+                page.on('popup', lambda p: asyncio.create_task(p.close()))
+            except Exception:
+                pass
+
+            print("[BOOT] Reuse tab yang sudah ada dari GoLogin")
         except Exception as e:
             print(f"[BOOT] Error creating page: {e}")
             return
@@ -1561,10 +1737,11 @@ async def main():
                 return False
 
             try:
-                await page.goto(TARGET_URL, wait_until="networkidle", timeout=30000)
+                # Jangan navigasi ke URL; hanya reload tab yang sama
+                await page.reload(wait_until="networkidle")
                 await asyncio.sleep(2)
             except Exception as e:
-                print(f"[FAST] Gagal buka target: {e}")
+                print(f"[FAST] Gagal reload awal: {e}")
 
             # Mulai watcher notifikasi global (exclude frame CF)
             async def notification_watchdog(page):
@@ -1591,13 +1768,13 @@ async def main():
                 except Exception:
                     pass
             if not ok:
-                # fallback: coba di homepage
+                # Dilarang navigasi ke homepage. Coba reload lagi sebagai fallback
                 try:
-                    await page.goto("https://flip.gg/", wait_until="networkidle", timeout=30000)
+                    await page.reload(wait_until="networkidle")
                     await asyncio.sleep(2)
-                    ok = await try_click_with_wait(60)
+                    ok = await try_click_with_wait(45)
                 except Exception as e:
-                    print(f"[FAST] Gagal buka homepage: {e}")
+                    print(f"[FAST] Gagal fallback reload: {e}")
                     ok = False
 
             if not ok:
@@ -1606,6 +1783,18 @@ async def main():
                 return
 
             # Alur baru sesuai SOP + diferensiasi CRASH vs LOADING vs CapSolver
+            result = await click_rain_with_30s_retry(page, max_attempts=4)
+            if result:
+                return
+            print("[FAST] Gagal join rain dalam 4 percobaan 30 detik. Mengakhiri eksekusi cepat.")
+            if telegram:
+                try:
+                    await telegram.send_message("❌ Gagal join rain dalam 4 percobaan (30 detik per percobaan).")
+                except Exception:
+                    pass
+            _save_fast_result('failed')
+            return
+
             success_after_checkbox = False
             crashed_prev = False
             for attempt in range(1, 4):
@@ -1634,9 +1823,9 @@ async def main():
 
                 # Reload hanya jika attempt sebelumnya terdeteksi CRASH Turnstile
                 if attempt > 1 and crashed_prev:
-                    print("[FAST] Attempt sebelumnya CRASH Turnstile → reload Flip sebelum lanjut")
+                    print("[FAST] Attempt sebelumnya CRASH Turnstile → reload halaman sebelum lanjut")
                     try:
-                        await page.goto(TARGET_URL, wait_until='networkidle', timeout=30000)
+                        await page.reload(wait_until='networkidle')
                         await asyncio.sleep(2)
                     except Exception as e:
                         print(f"[FAST] Reload gagal: {e}")
@@ -1689,7 +1878,7 @@ async def main():
                     # Iframe muncul tapi tidak ada checkbox → refresh halaman dan coba klik Rain lagi
                     print("[FAST] Iframe Turnstile tanpa checkbox → refresh dan ulangi klik Rain.")
                     try:
-                        await page.goto(TARGET_URL, wait_until='networkidle', timeout=30000)
+                        await page.reload(wait_until='networkidle')
                         await asyncio.sleep(2)
                     except Exception as e:
                         print(f"[FAST] Refresh gagal setelah no_checkbox: {e}")
