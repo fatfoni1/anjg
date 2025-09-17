@@ -156,14 +156,46 @@ def set_fast_execute(cfg: dict, value: bool = True) -> None:
 
 
 async def inject_token_init_script(context, token: str) -> None:
-    # Injeksi token HANYA saat origin flip.gg
+    # Injeksi token HANYA saat origin flip.gg + blokir semua interaksi (mode watcher, anti-klik)
     script = f"""
         (() => {{
             try {{
                 if (location && location.hostname && location.hostname.endsWith('flip.gg')) {{
+                    // Set token ke storage
                     localStorage.removeItem('token');
                     localStorage.setItem('token', '{token}');
                     try {{ sessionStorage.setItem('token', '{token}'); }} catch (e) {{}}
+
+                    // MODE WATCHER: Nonaktifkan SEMUA interaksi agar tidak ada aksi klik apapun
+                    try {{
+                        const block = (e) => {{ try {{ e.stopImmediatePropagation(); e.stopPropagation(); e.preventDefault(); }} catch(_) {{}} }};
+                        const events = ['click','mousedown','mouseup','pointerdown','pointerup','touchstart','touchend','keydown','keyup','submit'];
+                        events.forEach(ev => {{
+                            window.addEventListener(ev, block, true);
+                            document.addEventListener(ev, block, true);
+                        }});
+                        // No-op untuk programmatic click
+                        if (window.HTMLElement && window.HTMLElement.prototype) {{
+                            try {{ window.HTMLElement.prototype.click = function() {{ /* suppressed by watcher */ }}; }} catch (_) {{}}
+                        }}
+                        // Cegah window.open membuat tab/menavigasi
+                        try {{
+                            const _open = window.open;
+                            window.open = function(url, target, features) {{ try {{ /* jangan navigasi */ }} catch(_) {{}} return window; }};
+                        }} catch(_) {{}}
+                        // Cegah submit form eksplisit
+                        try {{
+                            document.addEventListener('submit', (e) => {{ try {{ e.preventDefault(); }} catch(_) {{}} }}, true);
+                        }} catch(_) {{}}
+                        // Opsi: hanya ubah cursor agar tidak mengganggu deteksi
+                        try {{
+                            const style = document.createElement('style');
+                            style.id = 'watcher-no-pointer-events';
+                            style.textContent = '* {{ cursor: default !important; }}';
+                            document.documentElement.appendChild(style);
+                        }} catch(_) {{}}
+                        console.log('[WATCHER] Interaksi pengguna dinonaktifkan (mode pemantauan)');
+                    }} catch(_) {{}}
                 }}
             }} catch (e) {{}}
         }})()
@@ -275,14 +307,17 @@ async def watcher_main():
             await asyncio.sleep(15)
             continue
 
-        # 2) Launch Playwright biasa (injeksi JWT + cek active)
+        # 2) Launch Playwright biasa (injeksi JWT + cek active) - seperti sebelumnya
         async with async_playwright() as pw:
             browser = await pw.chromium.launch(headless=headless_mode)
             context = await browser.new_context()
             await inject_token_init_script(context, token)
             page = await context.new_page()
             try:
+                print(f"[WATCHER] Navigasi ke {target_url}")
                 await page.goto(target_url, wait_until='domcontentloaded', timeout=30000)
+                # Tunggu halaman selesai loading sepenuhnya
+                await asyncio.sleep(5)
                 await send_telegram_if_available(cfg, f"🔎 Watcher aktif. Memantau tombol active setiap {CHECK_INTERVAL_SEC}s")
             except Exception as e:
                 print(f"[WATCHER] Gagal buka target: {e}")

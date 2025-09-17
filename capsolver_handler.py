@@ -141,18 +141,24 @@ class CapsolverHandler:
             print(f"[CAPSOLVER] Memulai solve Turnstile untuk {website_url}")
             print(f"[CAPSOLVER] Website Key: {website_key}")
         
-        # Gunakan task type yang benar sesuai dokumentasi CapSolver (AntiTurnstileTaskProxyLess)
+        # Siapkan payload sesuai dokumentasi CapSolver AntiTurnstileTask/ProxyLess
         task_data = {
             "type": "AntiTurnstileTaskProxyLess",
             "websiteURL": website_url,
-            "websiteKey": website_key,
-            "metadata": {
-                "action": action,  # Optional: data-action attribute
-                "cdata": cdata     # Optional: data-cdata attribute
-            }
+            "websiteKey": website_key
         }
+        # Sertakan metadata hanya jika ada nilainya + alias untuk kompatibilitas (pageAction/pageData)
+        meta: Dict[str, Any] = {}
+        if action:
+            meta["action"] = action
+            task_data["pageAction"] = action  # alias/kompatibilitas
+        if cdata:
+            meta["cdata"] = cdata
+            task_data["pageData"] = cdata    # alias/kompatibilitas
+        if meta:
+            task_data["metadata"] = meta
         
-        # Jika ada proxy, gunakan TurnstileTask dengan proxy
+        # Jika ada proxy, gunakan AntiTurnstileTask (non-proxyless)
         if proxy:
             task_data["type"] = "AntiTurnstileTask"
             task_data["proxy"] = proxy
@@ -172,8 +178,8 @@ class CapsolverHandler:
         
         # Ambil hasil dengan timeout yang lebih lama untuk Turnstile
         solution = await self.get_task_result(task_id, max_wait_time=180)  # 3 menit timeout
-        if solution and "token" in solution:
-            token = solution["token"]
+        if solution and ("token" in solution or "response" in solution):
+            token = solution.get("token") or solution.get("response")
             if self.notifier:
                 await self.notifier.send_message(
                     f"🔓 <b>CAPTCHA SOLVED</b> (CapSolver)\nToken: <code>{token[:42]}...</code>"

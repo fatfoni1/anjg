@@ -1,4 +1,4 @@
-import asyncio, time, random, json, re
+import asyncio, time, random, json, re, os
 from playwright.async_api import async_playwright, TimeoutError as PWTimeout
 from capsolver_handler import CapsolverHandler
 from telegram_notifier import TelegramNotifier
@@ -29,10 +29,11 @@ MAX_CF_RELOAD = 2
 
 def _save_fast_result(status: str):
     try:
-        with open('fast_exec_result.json', 'w') as f:
+        path = os.path.join(os.path.dirname(__file__), 'fast_exec_result.json')
+        with open(path, 'w', encoding='utf-8') as f:
             json.dump({"status": status, "ts": time.time()}, f)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[FAST-RESULT] Gagal simpan hasil: {e}")
 
 # ================== KONFIG ==================
 CDP_URL = config.get("cdp_url", "http://127.0.0.1:9222")
@@ -765,6 +766,21 @@ async def click_turnstile_checkbox(page):
     except Exception as e:
         print(f"[TURNSTILE] Error dalam text search: {e}")
     
+    # Fallback: klik tengah iframe Turnstile bila selector gagal
+    try:
+        print("[TURNSTILE] Fallback: klik tengah iframe Turnstile…")
+        iframe_el = page.locator(IFRAME_TURNSTILE).first
+        await iframe_el.wait_for(state="attached", timeout=5000)
+        box = await iframe_el.bounding_box()
+        if box and box["width"] > 5 and box["height"] > 5:
+            x = box["x"] + box["width"] / 2
+            y = box["y"] + box["height"] / 2
+            await page.mouse.click(x, y, delay=50)
+            print("[TURNSTILE] Fallback click tengah iframe berhasil")
+            return True
+    except Exception as e:
+        print(f"[TURNSTILE] Fallback click iframe gagal: {e}")
+
     print("[TURNSTILE] Checkbox tidak ditemukan di manapun")
     return False
 
@@ -981,6 +997,23 @@ async def auto_click_checkbox_if_found(page):
             except Exception:
                 continue
         
+        # Fallback terakhir: klik tengah iframe Turnstile bila ada
+        try:
+            iframe_count = await page.locator(IFRAME_TURNSTILE).count()
+            if iframe_count > 0:
+                print("[AUTO_CHECKBOX] Fallback: klik tengah iframe Turnstile…")
+                iframe_el = page.locator(IFRAME_TURNSTILE).first
+                await iframe_el.wait_for(state="attached", timeout=3000)
+                box = await iframe_el.bounding_box()
+                if box and box["width"] > 5 and box["height"] > 5:
+                    x = box["x"] + box["width"] / 2
+                    y = box["y"] + box["height"] / 2
+                    await page.mouse.click(x, y, delay=50)
+                    print("[AUTO_CHECKBOX] ✅ Fallback click tengah iframe berhasil")
+                    return True
+        except Exception:
+            pass
+
         return False
         
     except Exception as e:
@@ -998,7 +1031,10 @@ async def continuous_success_scanner(page):
     try:
         while True:
             try:
-                # Cek notifikasi sukses - PRIORITAS TERTINGGI
+                # Skip handling halaman informasi Rain (no refresh)
+                # Dihilangkan sesuai permintaan: tidak melakukan refresh saat info Rain muncul.
+                
+                # Cek notifikasi sukses - PRIORITAS TINGGI
                 success_found = await detect_success_notification_quick(page)
                 if success_found and not success_detected:
                     success_detected = True
@@ -1238,90 +1274,14 @@ async def handle_turnstile_challenge_with_refresh_retry(page):
         return "scanner_error"
 
 async def refresh_page_and_click_rain(page):
-    """Refresh halaman dan klik tombol rain lagi - TIDAK MEMBUKA TAB BARU"""
-    try:
-        await send_telegram_log("🔄 Melakukan refresh halaman (tanpa tab baru)...", "INFO")
-        
-        # Pastikan kita tetap di halaman yang sama, hanya refresh
-        current_url = page.url
-        await send_telegram_log(f"📍 URL saat ini: {current_url}", "DEBUG")
-        
-        # Refresh halaman yang sudah ada
-        await page.reload(wait_until="domcontentloaded", timeout=30000)
-        await asyncio.sleep(3)
-        
-        # Verifikasi masih di halaman yang sama
-        new_url = page.url
-        await send_telegram_log(f"📍 URL setelah refresh: {new_url}", "DEBUG")
-        
-        # Tunggu dan klik tombol rain lagi
-        await send_telegram_log("🎯 Mencari dan klik tombol rain setelah refresh...", "INFO")
-        
-        # Coba deteksi active dan klik
-        max_wait_time = 15  # Maksimal 15 detik tunggu tombol rain
-        start_time = time.time()
-        
-        while time.time() - start_time < max_wait_time:
-            sel = await detect_active(page)
-            if sel:
-                clicked = await click_join(page, sel)
-                if clicked:
-                    await send_telegram_log("✅ Berhasil klik tombol rain setelah refresh!", "SUCCESS")
-                    return True
-            await asyncio.sleep(1)
-        
-        # Fallback: coba selector umum
-        fallback_selectors = [
-            "button:has-text('Join now')",
-            "button:has-text('Join')",
-            "button:has-text('Rain')",
-            "button:has-text('Enter')",
-        ]
-        
-        for selector in fallback_selectors:
-            try:
-                if await page.locator(selector).count() > 0:
-                    btn = page.locator(selector).first
-                    await btn.scroll_into_view_if_needed()
-                    await btn.click()
-                    await send_telegram_log(f"✅ Berhasil klik fallback tombol: {selector}", "SUCCESS")
-                    return True
-            except Exception:
-                continue
-        
-        await send_telegram_log("❌ Tidak dapat menemukan tombol rain setelah refresh", "ERROR")
-        return False
-        
-    except Exception as e:
-        await send_telegram_log(f"❌ Error saat refresh dan klik rain: {e}", "ERROR")
-        return False
+    """FUNGSI INI TIDAK DIGUNAKAN LAGI - TIDAK MELAKUKAN REFRESH SETELAH KLIK RAIN"""
+    await send_telegram_log("🚫 FUNGSI REFRESH DINONAKTIFKAN - Tidak akan melakukan refresh setelah klik rain", "WARNING")
+    return False
 
-async def close_info_modal_if_present(page):
-    """Tutup dialog informasi Rain jika muncul dengan klik di luar/backdrop/ESC."""
-    try:
-        # Deteksi konten dialog
-        dlg = page.locator('.MuiDialogContent-root')
-        if await dlg.count() > 0:
-            # Coba klik backdrop Material-UI
-            try:
-                back = page.locator('.MuiBackdrop-root').first
-                if await back.count() > 0:
-                    await back.click(force=True)
-                    await asyncio.sleep(0.2)
-            except Exception:
-                pass
-            # Coba tekan Escape
-            try:
-                await page.keyboard.press('Escape')
-            except Exception:
-                pass
-            # Coba klik koordinat kecil di pojok (di luar dialog)
-            try:
-                await page.mouse.click(5, 5)
-            except Exception:
-                pass
-    except Exception:
-        pass
+async def check_rain_info_page_and_refresh(page):
+    """Dinonaktifkan: tidak menangani halaman informasi Rain, tidak ada refresh."""
+    return False
+
 
 async def click_rain_with_30s_retry(page, max_attempts: int = 1) -> bool:
     """Klik Rain lalu tunggu TANPA BATAS WAKTU untuk notifikasi sukses/already.
@@ -1329,6 +1289,10 @@ async def click_rain_with_30s_retry(page, max_attempts: int = 1) -> bool:
     Return True jika sukses/already, False jika gagal.
     """
     async def try_click_rain_once_local() -> bool:
+        # Pastikan halaman sudah selesai loading sepenuhnya
+        print("[FAST-UNLIMITED] Menunggu halaman selesai loading sepenuhnya...")
+        await asyncio.sleep(3)  # Tunggu 3 detik untuk memastikan loading selesai
+        
         # Coba selector prioritas
         sel = await detect_active(page)
         if sel:
@@ -1358,23 +1322,45 @@ async def click_rain_with_30s_retry(page, max_attempts: int = 1) -> bool:
                 continue
         return False
 
-    print(f"[FAST-UNLIMITED] Klik Rain dan tunggu TANPA BATAS WAKTU untuk notifikasi (scan setiap 0.2 detik)...")
-    # Tutup dialog info jika muncul
-    await close_info_modal_if_present(page)
-
-    # Klik Rain
+    print(f"[FAST-UNLIMITED] Memastikan halaman selesai loading sebelum klik Rain...")
+    
+    # Tunggu halaman selesai loading sepenuhnya
+    try:
+        await page.wait_for_load_state('networkidle', timeout=10000)
+        print("[FAST-UNLIMITED] Halaman selesai loading (networkidle)")
+    except Exception:
+        print("[FAST-UNLIMITED] Timeout networkidle, lanjut dengan domcontentloaded")
+        try:
+            await page.wait_for_load_state('domcontentloaded', timeout=5000)
+            print("[FAST-UNLIMITED] Halaman selesai loading (domcontentloaded)")
+        except Exception:
+            print("[FAST-UNLIMITED] Timeout domcontentloaded, lanjut tanpa tunggu")
+    
+    # Tunggu tambahan untuk memastikan semua elemen sudah siap
+    await asyncio.sleep(2)
+    print("[FAST-UNLIMITED] Tunggu loading selesai, langsung klik rain tanpa jeda...")
+    
+    
+    # Klik Rain LANGSUNG tanpa jeda setelah loading selesai
     clicked = await try_click_rain_once_local()
     if not clicked:
         print("[FAST-UNLIMITED] Tombol Rain tidak ditemukan - tidak ada yang bisa diklik")
         return False
 
     print("[FAST-UNLIMITED] ✅ Rain berhasil diklik - memulai scanner TANPA BATAS WAKTU...")
+    print("[FAST-UNLIMITED] 🚫 TIDAK AKAN MELAKUKAN REFRESH - tunggu sampai batas waktu 2 menit...")
 
-    # Start scanner yang juga auto-klik checkbox saat ditemukan - TANPA TIMEOUT
+    # Start scanner yang juga auto-klik checkbox saat ditemukan - DENGAN TIMEOUT 2 MENIT
     task = asyncio.create_task(continuous_success_scanner(page))
     result = None
     try:
-        result = await task  # Tunggu tanpa timeout
+        # Tunggu maksimal 2 menit (120 detik) sesuai permintaan
+        result = await asyncio.wait_for(task, timeout=120)
+        print(f"[FAST-UNLIMITED] Scanner selesai dengan hasil: {result}")
+    except asyncio.TimeoutError:
+        print("[FAST-UNLIMITED] ⏰ Timeout 2 menit tercapai - menghentikan scanner")
+        task.cancel()
+        result = "timeout"
     except Exception as e:
         print(f"[FAST-UNLIMITED] Error scanner: {e}")
         result = None
@@ -1384,13 +1370,21 @@ async def click_rain_with_30s_retry(page, max_attempts: int = 1) -> bool:
         if telegram:
             try:
                 if result == 'success':
-                    await telegram.send_message("🎉 <b>SUKSES JOIN RAIN!</b>\n\n✅ Scan interval: 0.2 detik (realtime)\n🚫 TANPA REFRESH setelah klik rain\n\nKonfirmasi: <i>Successfully joined rain!</i>")
+                    await telegram.send_message("🎉 <b>SUKSES JOIN RAIN!</b>\n\n✅ Scan interval: 0.2 detik (realtime)\n🚫 TANPA REFRESH setelah klik rain\n⏰ Tunggu sampai batas waktu 2 menit\n\nKonfirmasi: <i>Successfully joined rain!</i>")
                 else:
-                    await telegram.send_message("ℹ️ <b>ALREADY JOINED</b>\n\n✅ Scan interval: 0.2 detik (realtime)\n🚫 TANPA REFRESH setelah klik rain\n\nYou have already entered this rain!")
+                    await telegram.send_message("ℹ️ <b>ALREADY JOINED</b>\n\n✅ Scan interval: 0.2 detik (realtime)\n🚫 TANPA REFRESH setelah klik rain\n⏰ Tunggu sampai batas waktu 2 menit\n\nYou have already entered this rain!")
             except Exception:
                 pass
         _save_fast_result('success')
         return True
+    elif result == "timeout":
+        print("[FAST-UNLIMITED] ⏰ Batas waktu 2 menit tercapai tanpa hasil")
+        if telegram:
+            try:
+                await telegram.send_message("⏰ <b>TIMEOUT 2 MENIT</b>\n\n🚫 TANPA REFRESH setelah klik rain\n⏰ Menunggu sampai batas waktu 2 menit selesai\n\nTidak ada notifikasi sukses/already dalam 2 menit")
+            except Exception:
+                pass
+        return False
 
     print("[FAST-UNLIMITED] Scanner selesai tanpa hasil sukses/already")
     return False
@@ -1657,6 +1651,12 @@ async def main():
                 pass
 
             print("[BOOT] Reuse tab yang sudah ada dari GoLogin")
+            # Pasang event agar checkbox di iframe langsung diklik saat frame CF attach/navigate
+            try:
+                page.on('frameattached', lambda fr: asyncio.create_task(auto_click_checkbox_if_found(page)))
+                page.on('framenavigated', lambda fr: asyncio.create_task(auto_click_checkbox_if_found(page)))
+            except Exception:
+                pass
         except Exception as e:
             print(f"[BOOT] Error creating page: {e}")
             return
@@ -1746,12 +1746,13 @@ async def main():
                     await asyncio.sleep(1)
                 return False
 
+            # TIDAK MELAKUKAN RELOAD AWAL - langsung gunakan halaman yang sudah ada
+            print("[FAST] Menggunakan halaman yang sudah ada tanpa reload")
             try:
-                # Jangan navigasi ke URL; hanya reload tab yang sama
-                await page.reload(wait_until="networkidle")
+                # Tunggu sebentar untuk memastikan halaman siap
                 await asyncio.sleep(2)
             except Exception as e:
-                print(f"[FAST] Gagal reload awal: {e}")
+                print(f"[FAST] Error saat tunggu: {e}")
 
             # Mulai watcher notifikasi global (exclude frame CF)
             async def notification_watchdog(page):

@@ -405,41 +405,44 @@ def read_fast_result():
         logging.error(f"[FastResult] Error membaca hasil: {e}")
     return None
 
-def run_bot_with_retry(max_duration_minutes=2):
-    """Menjalankan bot dengan retry selama maksimal 2 menit sampai sukses."""
+def run_bot_with_retry(max_duration_minutes=5):
+    """Menjalankan bot dengan retry selama maksimal 5 menit sampai sukses."""
     start_time = time.time()
     max_duration_seconds = max_duration_minutes * 60
     attempt = 1
     
-    logging.info(f"[Bot] ⏰ MEMULAI TIMER 2 MENIT - Eksekusi cepat hingga 2 menit, tanpa menutup GoLogin.")
+    logging.info(f"[Bot] ⏰ MEMULAI TIMER 5 MENIT - Eksekusi cepat hingga 5 menit, tanpa menutup GoLogin.")
     logging.info(f"[Bot] Memulai eksekusi dengan retry maksimal {max_duration_minutes} menit...")
+    logging.info(f"[Bot] 🔄 Pastikan tunggu loading web selesai sebelum klik rain...")
     
     while True:
         current_time = time.time()
         elapsed_time = current_time - start_time
         
-        # PAKSA STOP setelah 2 menit - tidak peduli status apapun
+        # PAKSA STOP setelah 5 menit - tidak peduli status apapun
         if elapsed_time >= max_duration_seconds:
-            logging.info(f"[Bot] ⏰ WAKTU 2 MENIT HABIS! Menghentikan percobaan eksekusi cepat (GoLogin tetap berjalan).")
+            logging.info(f"[Bot] ⏰ WAKTU 5 MENIT HABIS! Menghentikan percobaan eksekusi cepat (GoLogin tetap berjalan).")
             logging.info(f"[Bot] Total percobaan: {attempt-1}, Total waktu: {elapsed_time:.1f} detik")
             break
             
         remaining_time = max_duration_seconds - elapsed_time
         logging.info(f"[Bot] 🔄 Percobaan ke-{attempt} (⏰ sisa waktu: {remaining_time:.1f} detik)")
         
-        # Jalankan bot dengan timeout yang ketat
+        # Jalankan bot dengan timeout yang lebih longgar
         try:
             # Set timeout untuk subprocess agar tidak melebihi sisa waktu
-            subprocess_timeout = min(remaining_time - 5, 30)  # Maksimal 30 detik per run
-            if subprocess_timeout <= 0:
+            # Berikan waktu lebih lama per run untuk menunggu loading dan proses 2 menit
+            subprocess_timeout = min(remaining_time - 10, 150)  # Maksimal 150 detik (2.5 menit) per run
+            if subprocess_timeout <= 30:  # Minimal 30 detik untuk satu run
                 logging.info("[Bot] ⏰ Sisa waktu tidak cukup untuk percobaan lagi.")
                 break
                 
+            logging.info(f"[Bot] 🚀 Menjalankan bot dengan timeout {subprocess_timeout} detik...")
             result = subprocess.run([sys.executable, BOT_SCRIPT_PATH], timeout=subprocess_timeout)
             rc = result.returncode or 0
             logging.info(f"[Bot] Percobaan ke-{attempt} selesai dengan kode {rc}")
         except subprocess.TimeoutExpired:
-            logging.info(f"[Bot] ⏰ Percobaan ke-{attempt} timeout, lanjut ke percobaan berikutnya")
+            logging.info(f"[Bot] ⏰ Percobaan ke-{attempt} timeout setelah {subprocess_timeout} detik")
             rc = 1
         
         # Cek hasil eksekusi
@@ -454,12 +457,12 @@ def run_bot_with_retry(max_duration_minutes=2):
         remaining_time = max_duration_seconds - elapsed_time
         
         # Jika waktu hampir habis, langsung break
-        if remaining_time <= 10:
+        if remaining_time <= 30:
             logging.info(f"[Bot] ⏰ Sisa waktu {remaining_time:.1f} detik, tidak cukup untuk retry lagi.")
             break
             
         # Delay singkat sebelum retry berikutnya
-        delay = min(3, remaining_time - 5)  # Delay 3 detik atau sisa waktu minus 5 detik
+        delay = min(5, remaining_time - 30)  # Delay 5 detik atau sisa waktu minus 30 detik
         if delay > 0:
             logging.info(f"[Bot] Belum sukses, retry dalam {delay} detik...")
             time.sleep(delay)
