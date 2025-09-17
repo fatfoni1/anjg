@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import ssl
 import sys
 from typing import Optional, Tuple
 
@@ -42,18 +43,43 @@ async def api_get_user_state(token: str) -> Optional[dict]:
     """Ambil data user via API langsung untuk wallet/WNFW. Return dict JSON atau None."""
     url = 'https://api.flip.gg/api/user'
     headers = {'x-auth-token': token}
+    
+    # SSL context toleran untuk RDP Windows
+    ssl_context = ssl.create_default_context()
+    ssl_context.check_hostname = False
+    ssl_context.verify_mode = ssl.CERT_NONE
+    timeout = aiohttp.ClientTimeout(total=30, connect=10)
+    
     try:
-        timeout = aiohttp.ClientTimeout(total=10)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
+        connector = aiohttp.TCPConnector(ssl=ssl_context, limit=10, limit_per_host=5)
+        async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
             async with session.get(url, headers=headers) as resp:
                 if resp.status == 200:
+                    print(f"[BALANCE] API berhasil diakses (SSL toleran)")
                     return await resp.json()
                 else:
                     print(f"[BALANCE] /api/user status: {resp.status}")
                     return None
     except Exception as e:
-        print(f"[BALANCE] API error: {e}")
-        return None
+        print(f"[BALANCE] SSL toleran gagal: {e}")
+        
+        # Fallback: coba tanpa SSL verification
+        try:
+            print(f"[BALANCE] Mencoba fallback tanpa SSL verification...")
+            connector = aiohttp.TCPConnector(ssl=False, limit=10, limit_per_host=5)
+            async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
+                # Gunakan HTTP sebagai fallback terakhir
+                fallback_url = url.replace("https://", "http://")
+                async with session.get(fallback_url, headers=headers) as resp:
+                    if resp.status == 200:
+                        print(f"[BALANCE] API berhasil diakses (HTTP fallback)")
+                        return await resp.json()
+                    else:
+                        print(f"[BALANCE] /api/user status (fallback): {resp.status}")
+                        return None
+        except Exception as e2:
+            print(f"[BALANCE] Semua metode gagal: {e2}")
+            return None
 
 async def capture_wallet_and_wnfw(token: str) -> Tuple[Optional[float], Optional[float]]:
     data = await api_get_user_state(token)

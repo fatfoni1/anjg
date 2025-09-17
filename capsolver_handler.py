@@ -1,6 +1,7 @@
 import asyncio
 import aiohttp
 import json
+import ssl
 import time
 from typing import Optional, Dict, Any
 from telegram_notifier import TelegramNotifier
@@ -31,8 +32,15 @@ class CapsolverHandler:
             "task": task_data
         }
         
+        # SSL context toleran untuk RDP Windows
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+        timeout = aiohttp.ClientTimeout(total=30, connect=10)
+        
         try:
-            async with aiohttp.ClientSession() as session:
+            connector = aiohttp.TCPConnector(ssl=ssl_context, limit=10, limit_per_host=5)
+            async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
                 async with session.post(url, json=payload) as response:
                     result = await response.json()
                     
@@ -69,9 +77,16 @@ class CapsolverHandler:
         
         start_time = time.time()
         
+        # SSL context toleran untuk RDP Windows
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+        timeout = aiohttp.ClientTimeout(total=30, connect=10)
+        
         while time.time() - start_time < max_wait_time:
             try:
-                async with aiohttp.ClientSession() as session:
+                connector = aiohttp.TCPConnector(ssl=ssl_context, limit=10, limit_per_host=5)
+                async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
                     async with session.post(url, json=payload) as response:
                         result = await response.json()
                         
@@ -189,8 +204,15 @@ class CapsolverHandler:
             "clientKey": self.api_key
         }
         
+        # SSL context toleran untuk RDP Windows
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+        timeout = aiohttp.ClientTimeout(total=30, connect=10)
+        
         try:
-            async with aiohttp.ClientSession() as session:
+            connector = aiohttp.TCPConnector(ssl=ssl_context, limit=10, limit_per_host=5)
+            async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
                 async with session.post(url, json=payload) as response:
                     result = await response.json()
                     

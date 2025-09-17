@@ -1,6 +1,7 @@
 import asyncio
 import aiohttp
 import json
+import ssl
 from typing import Optional
 from datetime import datetime
 
@@ -20,20 +21,51 @@ class TelegramNotifier:
             "parse_mode": parse_mode
         }
         
+        # Buat SSL context yang lebih toleran untuk RDP Windows
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+        
+        # Timeout untuk koneksi
+        timeout = aiohttp.ClientTimeout(total=30, connect=10)
+        
         try:
-            async with aiohttp.ClientSession() as session:
+            # Coba dengan SSL context yang toleran
+            connector = aiohttp.TCPConnector(ssl=ssl_context, limit=10, limit_per_host=5)
+            async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
                 async with session.post(url, json=payload) as response:
                     result = await response.json()
                     
                     if result.get("ok"):
+                        print(f"[TELEGRAM] Pesan berhasil dikirim (SSL toleran)")
                         return True
                     else:
                         print(f"[TELEGRAM] Error: {result.get('description')}")
                         return False
                         
         except Exception as e:
-            print(f"[TELEGRAM] Exception: {e}")
-            return False
+            print(f"[TELEGRAM] SSL toleran gagal: {e}")
+            
+            # Fallback: coba tanpa SSL verification sama sekali
+            try:
+                print(f"[TELEGRAM] Mencoba fallback tanpa SSL verification...")
+                connector = aiohttp.TCPConnector(ssl=False, limit=10, limit_per_host=5)
+                async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
+                    # Gunakan HTTP sebagai fallback terakhir (tidak aman tapi berfungsi di RDP)
+                    fallback_url = url.replace("https://", "http://")
+                    async with session.post(fallback_url, json=payload) as response:
+                        result = await response.json()
+                        
+                        if result.get("ok"):
+                            print(f"[TELEGRAM] Pesan berhasil dikirim (HTTP fallback)")
+                            return True
+                        else:
+                            print(f"[TELEGRAM] Error fallback: {result.get('description')}")
+                            return False
+                            
+            except Exception as e2:
+                print(f"[TELEGRAM] Semua metode gagal: {e2}")
+                return False
     
     async def send_success_notification(self, details: dict) -> bool:
         """Mengirim notifikasi sukses join"""
