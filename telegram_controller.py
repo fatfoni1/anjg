@@ -484,34 +484,33 @@ async def handle_check_balance_simple(query, is_refresh=False):
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Tampilkan menu utama"""
     keyboard = [
-        [InlineKeyboardButton("🚀 Start Bot", callback_data="start_bot")],
-        [InlineKeyboardButton("🛑 Stop Bot", callback_data="stop_bot")],
-        [InlineKeyboardButton("💰 Check Saldo", callback_data="check_balance")],
-        [InlineKeyboardButton("ℹ️ Info", callback_data="info")],
-        [InlineKeyboardButton("🧰 GoLogin", callback_data="gologin_menu")],
-        [InlineKeyboardButton("🌱 Kelola Seed", callback_data="seed_menu")],
-        [InlineKeyboardButton("👤 Kelola Akun", callback_data="akun_menu")],
-        [InlineKeyboardButton("⚙️ Settings", callback_data="settings")]
+        [InlineKeyboardButton("🚀 Start", callback_data="start_bot"), 
+         InlineKeyboardButton("🛑 Stop", callback_data="stop_bot")],
+        [InlineKeyboardButton("💰 Saldo", callback_data="check_balance"), 
+         InlineKeyboardButton("ℹ️ Info", callback_data="info")],
+        [InlineKeyboardButton("🧰 GoLogin", callback_data="gologin_menu"), 
+         InlineKeyboardButton("⚙️ Settings", callback_data="settings")],
+        [InlineKeyboardButton("🌱 Seed", callback_data="seed_menu"), 
+         InlineKeyboardButton("👤 Akun", callback_data="akun_menu")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     is_running = bot_process and bot_process.poll() is None
-    status = "🟢 Berjalan" if is_running else "🔴 Berhenti"
-    text = (
-        "🤖 *Bot Controller*\n\n"
-        f"Status saat ini: {status}\n\n"
-        "Pilih aksi yang ingin dilakukan:"
-    )
+    status = "🟢 ON" if is_running else "🔴 OFF"
+    profile = config.get('gologin_profile_name', 'N/A')[:15] + "..." if len(config.get('gologin_profile_name', 'N/A')) > 15 else config.get('gologin_profile_name', 'N/A')
+    
+    text = f"🤖 <b>Bot Controller</b>\n\n📊 Status: {status}\n👤 Profil: <code>{profile}</code>"
+    
     if update.callback_query:
         await update.callback_query.edit_message_text(
             text,
             reply_markup=reply_markup,
-            parse_mode='Markdown'
+            parse_mode='HTML'
         )
     else:
         await update.message.reply_text(
             text,
             reply_markup=reply_markup,
-            parse_mode='Markdown'
+            parse_mode='HTML'
         )
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -521,28 +520,24 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # =============== SUBMENU DLL =================
 async def gologin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
-        [InlineKeyboardButton("▶️ Start Profile", callback_data="gologin_start_profile"),
+        [InlineKeyboardButton("▶️ Start", callback_data="gologin_start_profile"),
+         InlineKeyboardButton("⏹ Stop", callback_data="gologin_stop_profile")],
+        [InlineKeyboardButton("🔁 Restart", callback_data="gologin_restart_profile"),
          InlineKeyboardButton("🔎 Status", callback_data="gologin_status")],
-        [InlineKeyboardButton("⏹ Stop Profile", callback_data="gologin_stop_profile"),
-         InlineKeyboardButton("🔁 Restart", callback_data="gologin_restart_profile")],
-        [InlineKeyboardButton("📜 Daftar Profil", callback_data="gologin_list_profiles")],
-        [InlineKeyboardButton("✅ Pilih Profil Aktif", callback_data="edit_gologin_profile_name")],
+        [InlineKeyboardButton("📜 Pilih Profil", callback_data="gologin_list_profiles")],
         [InlineKeyboardButton("⬅️ Kembali", callback_data="main_menu")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    profile_id = config.get('gologin_profile_id', 'N/A')
-    text = (
-        "🧰 GoLogin\n\n"
-        f"Profil Aktif (nama): `{config.get('gologin_profile_name','N/A')}`\n"
-        f"Profil Aktif (ID): `{profile_id}`\n"
-        f"CDP URL: `{config.get('cdp_url','N/A')}`\n"
-        f"API Token: `...{config.get('gologin_api_token','')[-5:]}`\n\n"
-        "Pilih aksi untuk mengelola profil GoLogin."
-    )
+    profile_name = config.get('gologin_profile_name', 'N/A')
+    profile_short = profile_name[:20] + "..." if len(profile_name) > 20 else profile_name
+    cdp_status = "🟢 UP" if _devtools_alive(config.get('cdp_url', '')) else "🔴 DOWN"
+    
+    text = f"🧰 <b>GoLogin</b>\n\n👤 Profil: <code>{profile_short}</code>\n📡 CDP: {cdp_status}"
+    
     if update.callback_query:
-        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode='HTML')
     else:
-        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode='Markdown')
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode='HTML')
 
 async def settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [

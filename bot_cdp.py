@@ -53,7 +53,39 @@ if config.get("capsolver_token") and config.get("capsolver_token") != "MASUKKAN_
 
 if config.get("telegram_token") and config.get("chat_id"):
     telegram = TelegramNotifier(config.get("telegram_token"), config.get("chat_id"))
-    print("[INIT] Telegram notifier initialized")
+    print(f"[INIT] Telegram notifier initialized - Token: {config.get('telegram_token')[:10]}... Chat ID: {config.get('chat_id')}")
+    
+    # Test koneksi Telegram saat startup
+    try:
+        import asyncio
+        async def test_telegram():
+            try:
+                result = await telegram.send_message("🤖 <b>BOT STARTUP</b>\n\nBot berhasil diinisialisasi dan siap bekerja!")
+                if result:
+                    print("[INIT] ✅ Test Telegram berhasil!")
+                else:
+                    print("[INIT] ❌ Test Telegram gagal!")
+            except Exception as e:
+                print(f"[INIT] ❌ Error test Telegram: {e}")
+        
+        # Jalankan test dalam event loop yang ada atau buat baru
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.create_task(test_telegram())
+            else:
+                loop.run_until_complete(test_telegram())
+        except:
+            # Fallback jika tidak ada event loop
+            asyncio.run(test_telegram())
+    except Exception as e:
+        print(f"[INIT] ❌ Error saat test Telegram: {e}")
+else:
+    print("[INIT] ⚠️ Telegram tidak diinisialisasi - token atau chat_id tidak tersedia")
+    if not config.get("telegram_token"):
+        print("[INIT] ❌ Telegram token tidak ditemukan dalam config")
+    if not config.get("chat_id"):
+        print("[INIT] ❌ Chat ID tidak ditemukan dalam config")
 
 async def send_event(message: str):
     """Kirim event feed sederhana ke Telegram (jika tersedia)."""
@@ -75,12 +107,25 @@ async def send_telegram_log(message: str, level: str = "INFO"):
                 "DEBUG": "🔍"
             }
             emoji = emoji_map.get(level, "📝")
-            await telegram.send_message(f"{emoji} <b>[{level}]</b> {message}")
+            full_message = f"{emoji} <b>[{level}]</b> {message}"
+            
+            # Debug logging untuk memastikan pesan dikirim
+            print(f"[TELEGRAM_LOG] Mengirim pesan: {full_message}")
+            
+            result = await telegram.send_message(full_message)
+            if result:
+                print(f"[TELEGRAM_LOG] ✅ Pesan berhasil dikirim!")
+            else:
+                print(f"[TELEGRAM_LOG] ❌ Pesan gagal dikirim!")
+                
         except Exception as e:
             print(f"[TELEGRAM] Error sending log: {e}")
+            # Fallback ke print jika telegram gagal
+            print(f"[{level}] {message}")
     else:
         # Fallback ke print jika telegram tidak tersedia
         print(f"[{level}] {message}")
+        print("[TELEGRAM_LOG] ⚠️ Telegram tidak tersedia - hanya print ke console")
 
 # === Selector kunci ===
 BTN_ACTIVE = 'button.tss-pqm623-content.active'
@@ -205,7 +250,7 @@ def set_already_joined_cooldown():
 
 async def check_already_joined(page):
     """Cek apakah sudah join sebelumnya (already joined)"""
-    print("[ALREADY_CHECK] Mengecek status already joined...")
+    await send_telegram_log("🔍 Mengecek status already joined...", "DEBUG")
     
     try:
         # Cek di main page
@@ -214,7 +259,7 @@ async def check_already_joined(page):
                 element = page.locator(selector).first
                 if await element.is_visible():
                     text = await element.text_content()
-                    print(f"[ALREADY_CHECK] Already joined terdeteksi: {text}")
+                    await send_telegram_log(f"ℹ️ Already joined terdeteksi: {text}", "INFO")
                     return True
         
         # Cek di semua frame
@@ -225,7 +270,7 @@ async def check_already_joined(page):
                         element = frame.locator(selector).first
                         if await element.is_visible():
                             text = await element.text_content()
-                            print(f"[ALREADY_CHECK] Already joined terdeteksi di frame: {text}")
+                            await send_telegram_log(f"ℹ️ Already joined terdeteksi di frame: {text}", "INFO")
                             return True
             except Exception:
                 continue
@@ -234,22 +279,22 @@ async def check_already_joined(page):
         already_keywords = ["already", "sudah", "duplicate", "participated", "entered before"]
         for keyword in already_keywords:
             if await page.locator(f'text=/{keyword}/i').count() > 0:
-                print(f"[ALREADY_CHECK] Keyword already ditemukan: {keyword}")
+                await send_telegram_log(f"ℹ️ Keyword already ditemukan: {keyword}", "INFO")
                 return True
                 
             # Cek juga di frame
             for frame in page.frames:
                 try:
                     if await frame.locator(f'text=/{keyword}/i').count() > 0:
-                        print(f"[ALREADY_CHECK] Keyword already ditemukan di frame: {keyword}")
+                        await send_telegram_log(f"ℹ️ Keyword already ditemukan di frame: {keyword}", "INFO")
                         return True
                 except Exception:
                     continue
                     
     except Exception as e:
-        print(f"[ALREADY_CHECK] Error: {e}")
+        await send_telegram_log(f"❌ Error saat cek already joined: {e}", "ERROR")
     
-    print("[ALREADY_CHECK] Tidak ada indikasi already joined")
+    await send_telegram_log("✅ Tidak ada indikasi already joined", "DEBUG")
     return False
 
 
@@ -833,61 +878,115 @@ async def inject_turnstile_token(page, token):
         return False
 
 async def detect_success_notification_quick(page):
-    """Deteksi cepat notifikasi sukses tanpa timeout panjang"""
+    """Deteksi cepat notifikasi sukses tanpa timeout panjang - LEBIH KETAT"""
     try:
-        # Cek di main page
-        for selector in SUCCESS_SELECTORS:
-            if await page.locator(selector).count() > 0:
-                element = page.locator(selector).first
-                if await element.is_visible():
-                    text = await element.text_content()
-                    print(f"[SUCCESS_QUICK] Notifikasi sukses ditemukan di main page: {text}")
-                    return True
+        print("[SUCCESS_QUICK] Memulai deteksi sukses dengan filter ketat...")
         
-        # Cek di semua frame/iframe
+        # HANYA cek keyword sukses yang SANGAT SPESIFIK untuk Rain
+        specific_success_keywords = [
+            "successfully joined",
+            "joined successfully", 
+            "successfully entered",
+            "entered successfully",
+            "rain joined",
+            "joined the rain",
+            "entered the rain",
+            "participation confirmed",
+            "entry confirmed"
+        ]
+        
+        # Cek di main page dengan keyword spesifik
+        for keyword in specific_success_keywords:
+            try:
+                if await page.locator(f'text=/{re.escape(keyword)}/i').count() > 0:
+                    element = page.locator(f'text=/{re.escape(keyword)}/i').first
+                    if await element.is_visible():
+                        text = await element.text_content()
+                        print(f"[SUCCESS_QUICK] ✅ SUKSES ASLI ditemukan di main page: '{text}' (keyword: {keyword})")
+                        return True
+            except Exception:
+                continue
+                
+        # Cek di frame flip.gg dengan keyword spesifik (exclude cf/turnstile)
         for frame in page.frames:
             try:
                 frame_url = (frame.url or "").lower()
-                # Skip frame cloudflare/turnstile
+                if 'flip.gg' not in frame_url:
+                    continue
                 if any(k in frame_url for k in ['cloudflare', 'turnstile', 'challenges.cloudflare.com']):
                     continue
                     
-                for selector in SUCCESS_SELECTORS:
-                    if await frame.locator(selector).count() > 0:
-                        element = frame.locator(selector).first
-                        if await element.is_visible():
-                            text = await element.text_content()
-                            print(f"[SUCCESS_QUICK] Notifikasi sukses ditemukan di frame {frame.url}: {text}")
+                for keyword in specific_success_keywords:
+                    try:
+                        if await frame.locator(f'text=/{re.escape(keyword)}/i').count() > 0:
+                            element = frame.locator(f'text=/{re.escape(keyword)}/i').first
+                            if await element.is_visible():
+                                text = await element.text_content()
+                                print(f"[SUCCESS_QUICK] ✅ SUKSES ASLI ditemukan di frame {frame.url}: '{text}' (keyword: {keyword})")
+                                return True
+                    except Exception:
+                        continue
+            except Exception:
+                continue
+        
+        # Cek selector sukses yang SANGAT SPESIFIK (hanya yang benar-benar untuk notifikasi)
+        specific_success_selectors = [
+            '.success-notification',
+            '.rain-success',
+            '.join-success', 
+            '.entry-success',
+            '.notification.success:has-text("joined")',
+            '.notification.success:has-text("entered")',
+            '.toast.success:has-text("joined")',
+            '.toast.success:has-text("entered")',
+            '.alert.success:has-text("joined")',
+            '.alert.success:has-text("entered")'
+        ]
+        
+        # Cek di main page dengan selector spesifik
+        for selector in specific_success_selectors:
+            try:
+                if await page.locator(selector).count() > 0:
+                    element = page.locator(selector).first
+                    if await element.is_visible():
+                        text = await element.text_content()
+                        # Validasi tambahan: pastikan teks mengandung kata kunci sukses
+                        if any(word in text.lower() for word in ['joined', 'entered', 'success', 'confirmed']):
+                            print(f"[SUCCESS_QUICK] ✅ SUKSES ASLI ditemukan via selector di main page: '{text}' (selector: {selector})")
                             return True
             except Exception:
                 continue
         
-        # Check for success keywords
-        success_keywords = ["successfully", "success", "joined", "entered", "complete", "done", "berhasil"]
-        for keyword in success_keywords:
-            if await page.locator(f'text=/{keyword}/i').count() > 0:
-                print(f"[SUCCESS_QUICK] Keyword sukses ditemukan di main page: {keyword}")
-                return True
-                
-            # Cek juga di frame flip.gg (exclude cf/turnstile)
-            for frame in page.frames:
-                try:
-                    frame_url = (frame.url or "").lower()
-                    if 'flip.gg' not in frame_url:
-                        continue
-                    if any(k in frame_url for k in ['cloudflare', 'turnstile', 'challenges.cloudflare.com']):
-                        continue
-                        
-                    if await frame.locator(f'text=/{keyword}/i').count() > 0:
-                        print(f"[SUCCESS_QUICK] Keyword sukses ditemukan di frame {frame.url}: {keyword}")
-                        return True
-                except Exception:
+        # Cek di frame flip.gg dengan selector spesifik
+        for frame in page.frames:
+            try:
+                frame_url = (frame.url or "").lower()
+                if 'flip.gg' not in frame_url:
+                    continue
+                if any(k in frame_url for k in ['cloudflare', 'turnstile', 'challenges.cloudflare.com']):
                     continue
                     
+                for selector in specific_success_selectors:
+                    try:
+                        if await frame.locator(selector).count() > 0:
+                            element = frame.locator(selector).first
+                            if await element.is_visible():
+                                text = await element.text_content()
+                                # Validasi tambahan: pastikan teks mengandung kata kunci sukses
+                                if any(word in text.lower() for word in ['joined', 'entered', 'success', 'confirmed']):
+                                    print(f"[SUCCESS_QUICK] ✅ SUKSES ASLI ditemukan via selector di frame {frame.url}: '{text}' (selector: {selector})")
+                                    return True
+                    except Exception:
+                        continue
+            except Exception:
+                continue
+                    
+        print("[SUCCESS_QUICK] ❌ Tidak ada notifikasi sukses ASLI yang ditemukan")
+        return False
+        
     except Exception as e:
         print(f"[SUCCESS_QUICK] Error: {e}")
-    
-    return False
+        return False
 
 async def auto_click_checkbox_if_found(page):
     """Fungsi untuk otomatis klik checkbox Turnstile kapanpun dan dimanapun ditemukan"""
@@ -1039,6 +1138,24 @@ async def continuous_success_scanner(page):
                 if success_found and not success_detected:
                     success_detected = True
                     print("[SUCCESS_SCANNER] ✅ SUKSES ditemukan! BERHENTI KLIK!")
+                    
+                    # Kirim notifikasi Telegram langsung dengan detail lengkap
+                    if telegram:
+                        try:
+                            await telegram.send_message(
+                                f"🎉 <b>SUKSES JOIN RAIN!</b>\n\n"
+                                f"✅ Notifikasi sukses berhasil terdeteksi\n"
+                                f"🎯 Status: ENTERED\n"
+                                f"⏰ Waktu: {time.strftime('%H:%M:%S', time.localtime())}\n"
+                                f"🔍 Scan interval: 0.2 detik (realtime)\n"
+                                f"🚫 TANPA REFRESH setelah klik rain\n\n"
+                                f"<i>Successfully joined rain!</i>"
+                            )
+                            print("[SUCCESS_SCANNER] ✅ Notifikasi Telegram sukses dikirim!")
+                        except Exception as e:
+                            print(f"[SUCCESS_SCANNER] ❌ Error kirim Telegram: {e}")
+                    
+                    # Tetap kirim log biasa sebagai backup
                     await send_telegram_log("🎉 SUKSES TERDETEKSI - Bot berhenti klik otomatis", "SUCCESS")
                     return "success"
                 
@@ -1575,14 +1692,14 @@ async def handle_turnstile_challenge_legacy(page):
 
 async def main():
     async with async_playwright() as p:
-        print("[BOOT] Connect CDP:", CDP_URL)
+        await send_telegram_log(f"🔗 Menghubungkan ke CDP: {CDP_URL}", "INFO")
         
         try:
             browser = await p.chromium.connect_over_cdp(CDP_URL)
-            print("[BOOT] CDP connection berhasil")
+            await send_telegram_log("✅ Koneksi CDP berhasil", "SUCCESS")
         except Exception as e:
-            print(f"[BOOT] Error connecting to CDP at {CDP_URL}: {e}")
-            print("[BOOT] Pastikan profil GoLogin berhasil start dan DevTools endpoint (CDP) aktif.")
+            await send_telegram_log(f"❌ Error koneksi CDP di {CDP_URL}: {e}", "ERROR")
+            await send_telegram_log("⚠️ Pastikan profil GoLogin berhasil start dan DevTools endpoint (CDP) aktif", "WARNING")
             # Exit non-zero agar caller (watcher) mengetahui kegagalan dan tidak lanjut ke saldo/wnfw
             import os
             os._exit(3)
@@ -1590,7 +1707,7 @@ async def main():
         try:
             # Gunakan context & page yang SUDAH ADA dari GoLogin. Dilarang membuat tab baru.
             if not browser.contexts:
-                print("[BOOT] ERROR: Tidak ada context aktif dari GoLogin. Kebijakan melarang membuat context/tab baru.")
+                await send_telegram_log("❌ ERROR: Tidak ada context aktif dari GoLogin. Kebijakan melarang membuat context/tab baru.", "ERROR")
                 import os as _os
                 _os._exit(3)
             ctx = browser.contexts[0]
@@ -1638,7 +1755,7 @@ async def main():
             # Ambil page yang sudah ada; JANGAN membuat new_page
             pages = ctx.pages if hasattr(ctx, 'pages') else []
             if not pages:
-                print("[BOOT] ERROR: Tidak ditemukan tab aktif pada GoLogin. Kebijakan melarang membuat tab baru.")
+                await send_telegram_log("❌ ERROR: Tidak ditemukan tab aktif pada GoLogin. Kebijakan melarang membuat tab baru.", "ERROR")
                 import os as _os
                 _os._exit(3)
             page = pages[0]
@@ -1650,7 +1767,7 @@ async def main():
             except Exception:
                 pass
 
-            print("[BOOT] Reuse tab yang sudah ada dari GoLogin")
+            await send_telegram_log("🔄 Menggunakan tab yang sudah ada dari GoLogin", "INFO")
             # Pasang event agar checkbox di iframe langsung diklik saat frame CF attach/navigate
             try:
                 page.on('frameattached', lambda fr: asyncio.create_task(auto_click_checkbox_if_found(page)))
@@ -1746,8 +1863,36 @@ async def main():
                     await asyncio.sleep(1)
                 return False
 
-            # TIDAK MELAKUKAN RELOAD AWAL - langsung gunakan halaman yang sudah ada
-            print("[FAST] Menggunakan halaman yang sudah ada tanpa reload")
+            # REFRESH HALAMAN SETELAH WATCHER ACTIVE TERDETEKSI
+            await send_telegram_log("🔄 Refresh halaman GoLogin setelah watcher active terdeteksi", "INFO")
+            
+            try:
+                # Pastikan kita di halaman flip.gg
+                current_url = page.url
+                if not current_url or 'flip.gg' not in current_url:
+                    await send_telegram_log(f"🔄 Navigasi ke {TARGET_URL} sebelum refresh", "INFO")
+                    await page.goto(TARGET_URL, wait_until='domcontentloaded', timeout=30000)
+                    await asyncio.sleep(2)
+                
+                # Lakukan refresh halaman
+                await send_telegram_log("🔄 Melakukan refresh halaman...", "INFO")
+                await page.reload(wait_until='domcontentloaded', timeout=30000)
+                
+                # Tunggu halaman selesai loading setelah refresh
+                await asyncio.sleep(3)
+                
+                # Verifikasi halaman berhasil di-refresh
+                final_url = page.url
+                if 'flip.gg' in final_url:
+                    await send_telegram_log(f"✅ Refresh berhasil! URL: {final_url}", "SUCCESS")
+                else:
+                    await send_telegram_log(f"⚠️ Refresh mungkin gagal, URL: {final_url}", "WARNING")
+                    
+            except Exception as e:
+                await send_telegram_log(f"❌ Error refresh halaman: {str(e)[:100]}", "ERROR")
+            
+            # TIDAK MELAKUKAN RELOAD AWAL LAGI - sudah refresh di atas
+            await send_telegram_log("🔄 Menggunakan halaman yang sudah di-refresh", "INFO")
             try:
                 # Tunggu sebentar untuk memastikan halaman siap
                 await asyncio.sleep(2)
@@ -1972,7 +2117,7 @@ async def main():
                     await asyncio.sleep(CHECK_INTERVAL_SEC + random.random())
                     continue
 
-                print("[ACTIVE] Active terdeteksi!")
+                await send_telegram_log("🎯 ACTIVE TERDETEKSI! Memulai proses klik rain...", "SUCCESS")
 
                 if await click_join(page, sel):
                     last_join = now()
