@@ -250,7 +250,7 @@ def set_already_joined_cooldown():
 
 async def check_already_joined(page):
     """Cek apakah sudah join sebelumnya (already joined)"""
-    await send_telegram_log("🔍 Mengecek status already joined...", "DEBUG")
+    # Kurangi log spam - hanya log saat benar-benar menemukan already joined
     
     try:
         # Cek di main page
@@ -294,7 +294,7 @@ async def check_already_joined(page):
     except Exception as e:
         await send_telegram_log(f"❌ Error saat cek already joined: {e}", "ERROR")
     
-    await send_telegram_log("✅ Tidak ada indikasi already joined", "DEBUG")
+    # Tidak perlu log jika tidak ada already joined - kurangi spam
     return False
 
 
@@ -880,7 +880,7 @@ async def inject_turnstile_token(page, token):
 async def detect_success_notification_quick(page):
     """Deteksi cepat notifikasi sukses tanpa timeout panjang - LEBIH KETAT"""
     try:
-        print("[SUCCESS_QUICK] Memulai deteksi sukses dengan filter ketat...")
+        # Kurangi log spam - hanya print saat benar-benar menemukan sukses
         
         # HANYA cek keyword sukses yang SANGAT SPESIFIK untuk Rain
         specific_success_keywords = [
@@ -981,7 +981,7 @@ async def detect_success_notification_quick(page):
             except Exception:
                 continue
                     
-        print("[SUCCESS_QUICK] ❌ Tidak ada notifikasi sukses ASLI yang ditemukan")
+        # Tidak perlu log jika tidak ada sukses - kurangi spam
         return False
         
     except Exception as e:
@@ -1190,11 +1190,8 @@ async def continuous_success_scanner(page):
                             await send_telegram_log("ℹ️ ALREADY JOINED setelah klik checkbox - Bot berhenti", "INFO")
                             return "already"
                 else:
-                    # Jika sudah ada sukses/already, jangan klik apa-apa lagi
-                    if success_detected:
-                        print("[SUCCESS_SCANNER] Sukses sudah terdeteksi - menunggu tanpa klik")
-                    elif already_detected:
-                        print("[SUCCESS_SCANNER] Already joined sudah terdeteksi - menunggu tanpa klik")
+                    # Jika sudah ada sukses/already, jangan klik apa-apa lagi (kurangi log spam)
+                    pass
                 
                 # Scan setiap 0.2 detik untuk responsivitas maksimal (realtime)
                 await asyncio.sleep(0.2)
@@ -1209,6 +1206,142 @@ async def continuous_success_scanner(page):
         raise
     except Exception as e:
         print(f"[SUCCESS_SCANNER] Fatal error: {e}")
+        return "error"
+
+async def continuous_24h_scanner(page):
+    """Scanner 24 jam untuk checkbox Turnstile dan notifikasi sukses/already - TANPA TIMEOUT"""
+    print("[24H_SCANNER] 🔄 Memulai scanner 24 jam untuk checkbox dan notifikasi...")
+    await send_telegram_log("🔄 Scanner 24 jam dimulai - scan checkbox dan notifikasi setiap 0.2 detik", "INFO")
+    
+    # Statistik untuk tracking
+    start_time = time.time()
+    checkbox_clicks = 0
+    success_detected = False
+    already_detected = False
+    
+    try:
+        while True:
+            try:
+                current_time = time.time()
+                elapsed_hours = (current_time - start_time) / 3600
+                
+                # Log progress setiap jam
+                if int(elapsed_hours) > int((current_time - start_time - 0.2) / 3600):
+                    hours_passed = int(elapsed_hours)
+                    print(f"[24H_SCANNER] ⏰ {hours_passed} jam berlalu - checkbox diklik: {checkbox_clicks} kali")
+                    await send_telegram_log(f"⏰ Scanner 24 jam: {hours_passed} jam berlalu, checkbox diklik: {checkbox_clicks} kali", "INFO")
+                
+                # PRIORITAS 1: Cek notifikasi sukses
+                success_found = await detect_success_notification_quick(page)
+                if success_found and not success_detected:
+                    success_detected = True
+                    elapsed_time = time.time() - start_time
+                    print(f"[24H_SCANNER] 🎉 SUKSES ditemukan setelah {elapsed_time/60:.1f} menit!")
+                    
+                    # Kirim notifikasi Telegram dengan statistik lengkap
+                    if telegram:
+                        try:
+                            await telegram.send_message(
+                                f"🎉 <b>SUKSES JOIN RAIN!</b>\n\n"
+                                f"✅ Notifikasi sukses berhasil terdeteksi\n"
+                                f"🎯 Status: ENTERED\n"
+                                f"⏰ Waktu scan: {elapsed_time/60:.1f} menit\n"
+                                f"🖱️ Checkbox diklik: {checkbox_clicks} kali\n"
+                                f"🔍 Scan interval: 0.2 detik (realtime)\n"
+                                f"🚫 TANPA REFRESH setelah klik rain\n"
+                                f"📊 Scanner 24 jam aktif\n\n"
+                                f"<i>Successfully joined rain!</i>"
+                            )
+                            print("[24H_SCANNER] ✅ Notifikasi Telegram sukses dikirim!")
+                        except Exception as e:
+                            print(f"[24H_SCANNER] ❌ Error kirim Telegram: {e}")
+                    
+                    await send_telegram_log("🎉 SUKSES TERDETEKSI - Scanner 24 jam berhenti", "SUCCESS")
+                    return "success"
+                
+                # PRIORITAS 2: Cek already joined
+                already_found = await check_already_joined(page)
+                if already_found and not already_detected:
+                    already_detected = True
+                    elapsed_time = time.time() - start_time
+                    print(f"[24H_SCANNER] ℹ️ Already joined ditemukan setelah {elapsed_time/60:.1f} menit!")
+                    
+                    # Kirim notifikasi Telegram
+                    if telegram:
+                        try:
+                            await telegram.send_message(
+                                f"ℹ️ <b>ALREADY JOINED</b>\n\n"
+                                f"⏰ Waktu scan: {elapsed_time/60:.1f} menit\n"
+                                f"🖱️ Checkbox diklik: {checkbox_clicks} kali\n"
+                                f"🔍 Scan interval: 0.2 detik (realtime)\n"
+                                f"🚫 TANPA REFRESH setelah klik rain\n"
+                                f"📊 Scanner 24 jam aktif\n\n"
+                                f"You have already entered this rain!"
+                            )
+                        except Exception as e:
+                            print(f"[24H_SCANNER] ❌ Error kirim Telegram: {e}")
+                    
+                    await send_telegram_log("ℹ️ ALREADY JOINED TERDETEKSI - Scanner 24 jam berhenti", "INFO")
+                    return "already"
+                
+                # PRIORITAS 3: Auto-klik checkbox jika belum ada sukses/already
+                if not success_detected and not already_detected:
+                    checkbox_found = await auto_click_checkbox_if_found(page)
+                    if checkbox_found:
+                        checkbox_clicks += 1
+                        print(f"[24H_SCANNER] 🎯 Checkbox #{checkbox_clicks} diklik otomatis!")
+                        
+                        # Setelah klik checkbox, tunggu sebentar dan cek lagi notifikasi
+                        await asyncio.sleep(1)
+                        
+                        # Cek ulang notifikasi setelah klik checkbox
+                        success_found = await detect_success_notification_quick(page)
+                        if success_found:
+                            success_detected = True
+                            elapsed_time = time.time() - start_time
+                            print(f"[24H_SCANNER] ✅ SUKSES setelah klik checkbox #{checkbox_clicks}!")
+                            
+                            if telegram:
+                                try:
+                                    await telegram.send_message(
+                                        f"🎉 <b>SUKSES SETELAH KLIK CHECKBOX!</b>\n\n"
+                                        f"✅ Checkbox #{checkbox_clicks} berhasil\n"
+                                        f"🎯 Notifikasi sukses terdeteksi\n"
+                                        f"⏰ Waktu: {elapsed_time/60:.1f} menit\n"
+                                        f"🔍 Scanner 24 jam aktif\n\n"
+                                        f"<i>Successfully joined rain!</i>"
+                                    )
+                                except Exception as e:
+                                    print(f"[24H_SCANNER] ❌ Error kirim Telegram: {e}")
+                            
+                            await send_telegram_log("🎉 SUKSES setelah klik checkbox - Scanner berhenti", "SUCCESS")
+                            return "success"
+                        
+                        already_found = await check_already_joined(page)
+                        if already_found:
+                            already_detected = True
+                            elapsed_time = time.time() - start_time
+                            print(f"[24H_SCANNER] ℹ️ Already joined setelah klik checkbox #{checkbox_clicks}!")
+                            await send_telegram_log("ℹ️ ALREADY JOINED setelah klik checkbox - Scanner berhenti", "INFO")
+                            return "already"
+                
+                # Scan setiap 0.2 detik untuk responsivitas maksimal (realtime)
+                await asyncio.sleep(0.2)
+                
+            except Exception as e:
+                print(f"[24H_SCANNER] Error dalam scan: {e}")
+                await asyncio.sleep(0.2)
+                continue
+                
+    except asyncio.CancelledError:
+        elapsed_time = time.time() - start_time
+        print(f"[24H_SCANNER] Scanner dibatalkan setelah {elapsed_time/60:.1f} menit, checkbox diklik: {checkbox_clicks} kali")
+        await send_telegram_log(f"⏹️ Scanner 24 jam dibatalkan setelah {elapsed_time/60:.1f} menit", "WARNING")
+        raise
+    except Exception as e:
+        elapsed_time = time.time() - start_time
+        print(f"[24H_SCANNER] Fatal error setelah {elapsed_time/60:.1f} menit: {e}")
+        await send_telegram_log(f"❌ Scanner 24 jam error setelah {elapsed_time/60:.1f} menit: {e}", "ERROR")
         return "error"
 
 async def handle_turnstile_challenge_with_refresh_retry(page):
@@ -1400,21 +1533,39 @@ async def check_rain_info_page_and_refresh(page):
     return False
 
 
-async def click_rain_with_30s_retry(page, max_attempts: int = 1) -> bool:
-    """Klik Rain lalu tunggu TANPA BATAS WAKTU untuk notifikasi sukses/already.
-    TIDAK MELAKUKAN REFRESH setelah klik rain. Scan dengan interval 0.2 detik.
-    Return True jika sukses/already, False jika gagal.
-    """
-    async def try_click_rain_once_local() -> bool:
-        # Pastikan halaman sudah selesai loading sepenuhnya
-        print("[FAST-UNLIMITED] Menunggu halaman selesai loading sepenuhnya...")
+async def simple_rain_execution(page) -> bool:
+    """Eksekusi sederhana: refresh → klik rain → scan 24 jam untuk checkbox dan notifikasi"""
+    
+    # LANGKAH 1: Refresh halaman sekali
+    try:
+        current_url = page.url or ""
+        print(f"[SIMPLE] URL saat ini: {current_url}")
+        if not current_url or 'flip.gg' not in current_url:
+            print("[SIMPLE] Navigasi ke flip.gg...")
+            await page.goto(TARGET_URL, wait_until='domcontentloaded', timeout=15000)
+        else:
+            print("[SIMPLE] Refresh halaman sekali...")
+            await page.reload(wait_until='domcontentloaded', timeout=15000)
+        print("[SIMPLE] ✅ Refresh selesai!")
+        
+        # Tunggu halaman siap
+        await page.wait_for_load_state('domcontentloaded', timeout=10000)
         await asyncio.sleep(3)  # Tunggu 3 detik untuk memastikan loading selesai
         
-        # Coba selector prioritas
-        sel = await detect_active(page)
-        if sel:
-            return await click_join(page, sel)
-        # Fallback berbasis teks
+    except Exception as e:
+        print(f"[SIMPLE] Error refresh: {e}")
+    
+    # LANGKAH 2: Klik Rain
+    print("[SIMPLE] Mencari dan mengklik tombol Rain...")
+    rain_clicked = False
+    
+    # Coba selector prioritas
+    sel = await detect_active(page)
+    if sel:
+        rain_clicked = await click_join(page, sel)
+    
+    # Fallback berbasis teks jika selector prioritas gagal
+    if not rain_clicked:
         for fs in [
             "button:has-text('Join now')",
             "button:has-text('Join')",
@@ -1430,81 +1581,44 @@ async def click_rain_with_30s_retry(page, max_attempts: int = 1) -> bool:
                         pass
                     try:
                         await btn.click()
-                        print(f"[CLICK] Klik fallback tombol: {fs}")
-                        return True
+                        print(f"[SIMPLE] Klik fallback tombol: {fs}")
+                        rain_clicked = True
+                        break
                     except Exception as e:
-                        print(f"[CLICK] Gagal klik fallback {fs}: {e}")
+                        print(f"[SIMPLE] Gagal klik fallback {fs}: {e}")
                         continue
             except Exception:
                 continue
+    
+    if not rain_clicked:
+        print("[SIMPLE] ❌ Tombol Rain tidak ditemukan - tidak ada yang bisa diklik")
+        await send_telegram_log("❌ Tombol Rain tidak ditemukan", "ERROR")
         return False
-
-    print(f"[FAST-UNLIMITED] Memastikan halaman selesai loading sebelum klik Rain...")
     
-    # Tunggu halaman selesai loading sepenuhnya
+    print("[SIMPLE] ✅ Rain berhasil diklik!")
+    await send_telegram_log("✅ Rain berhasil diklik - memulai scan 24 jam", "SUCCESS")
+    
+    # LANGKAH 3: Mulai scan 24 jam untuk checkbox dan notifikasi
+    print("[SIMPLE] 🔄 Memulai scan 24 jam untuk checkbox Turnstile dan notifikasi sukses/already...")
+    await send_telegram_log("🔄 Memulai scan 24 jam untuk checkbox dan notifikasi", "INFO")
+    
+    # Start scanner 24 jam tanpa timeout
+    task = asyncio.create_task(continuous_24h_scanner(page))
+    
     try:
-        await page.wait_for_load_state('networkidle', timeout=10000)
-        print("[FAST-UNLIMITED] Halaman selesai loading (networkidle)")
-    except Exception:
-        print("[FAST-UNLIMITED] Timeout networkidle, lanjut dengan domcontentloaded")
-        try:
-            await page.wait_for_load_state('domcontentloaded', timeout=5000)
-            print("[FAST-UNLIMITED] Halaman selesai loading (domcontentloaded)")
-        except Exception:
-            print("[FAST-UNLIMITED] Timeout domcontentloaded, lanjut tanpa tunggu")
-    
-    # Tunggu tambahan untuk memastikan semua elemen sudah siap
-    await asyncio.sleep(2)
-    print("[FAST-UNLIMITED] Tunggu loading selesai, langsung klik rain tanpa jeda...")
-    
-    
-    # Klik Rain LANGSUNG tanpa jeda setelah loading selesai
-    clicked = await try_click_rain_once_local()
-    if not clicked:
-        print("[FAST-UNLIMITED] Tombol Rain tidak ditemukan - tidak ada yang bisa diklik")
-        return False
-
-    print("[FAST-UNLIMITED] ✅ Rain berhasil diklik - memulai scanner TANPA BATAS WAKTU...")
-    print("[FAST-UNLIMITED] 🚫 TIDAK AKAN MELAKUKAN REFRESH - tunggu sampai batas waktu 2 menit...")
-
-    # Start scanner yang juga auto-klik checkbox saat ditemukan - DENGAN TIMEOUT 2 MENIT
-    task = asyncio.create_task(continuous_success_scanner(page))
-    result = None
-    try:
-        # Tunggu maksimal 2 menit (120 detik) sesuai permintaan
-        result = await asyncio.wait_for(task, timeout=120)
-        print(f"[FAST-UNLIMITED] Scanner selesai dengan hasil: {result}")
-    except asyncio.TimeoutError:
-        print("[FAST-UNLIMITED] ⏰ Timeout 2 menit tercapai - menghentikan scanner")
-        task.cancel()
-        result = "timeout"
+        result = await task  # Tunggu tanpa timeout (24 jam)
+        print(f"[SIMPLE] Scanner 24 jam selesai dengan hasil: {result}")
+        
+        if result in ("success", "already"):
+            _save_fast_result('success')
+            return True
+        else:
+            return False
+            
     except Exception as e:
-        print(f"[FAST-UNLIMITED] Error scanner: {e}")
-        result = None
-
-    if result in ("success", "already"):
-        # Kirim notifikasi
-        if telegram:
-            try:
-                if result == 'success':
-                    await telegram.send_message("🎉 <b>SUKSES JOIN RAIN!</b>\n\n✅ Scan interval: 0.2 detik (realtime)\n🚫 TANPA REFRESH setelah klik rain\n⏰ Tunggu sampai batas waktu 2 menit\n\nKonfirmasi: <i>Successfully joined rain!</i>")
-                else:
-                    await telegram.send_message("ℹ️ <b>ALREADY JOINED</b>\n\n✅ Scan interval: 0.2 detik (realtime)\n🚫 TANPA REFRESH setelah klik rain\n⏰ Tunggu sampai batas waktu 2 menit\n\nYou have already entered this rain!")
-            except Exception:
-                pass
-        _save_fast_result('success')
-        return True
-    elif result == "timeout":
-        print("[FAST-UNLIMITED] ⏰ Batas waktu 2 menit tercapai tanpa hasil")
-        if telegram:
-            try:
-                await telegram.send_message("⏰ <b>TIMEOUT 2 MENIT</b>\n\n🚫 TANPA REFRESH setelah klik rain\n⏰ Menunggu sampai batas waktu 2 menit selesai\n\nTidak ada notifikasi sukses/already dalam 2 menit")
-            except Exception:
-                pass
+        print(f"[SIMPLE] Error scanner 24 jam: {e}")
+        await send_telegram_log(f"❌ Error scanner 24 jam: {e}", "ERROR")
         return False
-
-    print("[FAST-UNLIMITED] Scanner selesai tanpa hasil sukses/already")
-    return False
 
 async def handle_turnstile_challenge(page):
     """Wrapper untuk handle_turnstile_challenge_with_refresh_retry dengan fallback ke metode lama"""
@@ -1779,8 +1893,26 @@ async def main():
             return
 
         # Mode fast-execute: langsung eksekusi tanpa loop monitoring panjang
-        if FAST_EXECUTE:
-            print("[FAST] Mode fast_execute aktif. Menjalankan eksekusi cepat.")
+        # Jalankan bot utama dengan eksekusi sederhana
+        try:
+            print("[SIMPLE] Memulai eksekusi sederhana: refresh → klik rain → scan 24 jam")
+            await send_telegram_log("🚀 Memulai eksekusi sederhana", "INFO")
+            
+            success = await simple_rain_execution(page)
+            
+            if success:
+                print("[SIMPLE] ✅ Eksekusi sederhana berhasil!")
+                await send_telegram_log("✅ Eksekusi sederhana berhasil!", "SUCCESS")
+                _save_fast_result('success')
+            else:
+                print("[SIMPLE] ❌ Eksekusi sederhana gagal atau timeout")
+                await send_telegram_log("❌ Eksekusi sederhana gagal atau timeout", "ERROR")
+                _save_fast_result('failed')
+                
+        except Exception as e:
+            print(f"[SIMPLE] Error dalam eksekusi sederhana: {e}")
+            await send_telegram_log(f"❌ Error dalam eksekusi sederhana: {e}", "ERROR")
+            _save_fast_result('error')
 
             async def detect_text_in_flip_frames(text: str, timeout_sec: int) -> bool:
                 """Cari teks pada main page dan frames domain flip.gg (exclude cf/turnstile). Partial match, case-insensitive."""

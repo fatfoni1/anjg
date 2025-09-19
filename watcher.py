@@ -324,6 +324,7 @@ async def watcher_main():
 
             # 3) Loop cek active per 5 detik
             active_found = False
+
             while True:
                 try:
                     # urutan deteksi selector
@@ -342,6 +343,7 @@ async def watcher_main():
                     print('[WATCHER] Active terdeteksi. Menjalankan executor GoLogin...')
                     await send_telegram_if_available(cfg, '🚦 Active terdeteksi. Menjalankan eksekusi GoLogin...')
                     break
+
                 await asyncio.sleep(CHECK_INTERVAL_SEC)
 
             # Tutup watcher browser sebelum jalankan executor
