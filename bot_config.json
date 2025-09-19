@@ -4,7 +4,7 @@
   "gologin_api_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiI2OGNjNzViYjE1MGFlNjQ1OWMzNTExODIiLCJ0eXBlIjoiZGV2Iiwiand0aWQiOiI2OGNjNzY1MjQ5OWU1MDdhYmM4YjZjODUifQ.AduYdlAPiFVzwckiWX4IvVm8MqQfq_ma1ZZmrK0l85Q",
   "gologin_profile_name": "profile 1",
   "capsolver_token": "CAP-8ECADE2848BCBED1F1B0F7502DA321B77D5CC3B86607F0072D6C37055A3F41C9",
-  "cdp_url": "http://127.0.0.1:19872",
+  "cdp_url": "http://127.0.0.1:29184",
   "target_url": "https://flip.gg/profile",
   "check_interval_sec": 5,
   "reload_every_sec": 300,
