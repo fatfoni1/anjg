@@ -1,0 +1,530 @@
+=== DOKUMENTASI SISTEM RAIN BOT TELEGRAM V2.0 ===
+=== DENGAN QUEUE MANAGEMENT & SMART TIMING ===
+
+╔══════════════════════════════════════════════════════════════╗
+║                    1. OVERVIEW SISTEM                       ║
+╚══════════════════════════════════════════════════════════════╝
+
+KONSEP UTAMA:
+- Bot Telegram rain claimer 24/7 dengan queue management
+- Smart timing untuk memastikan semua akun terklaim
+- Parallel processing dengan Chromium multiple
+- Auto captcha bypass dengan Capsolver
+- Priority queue system untuk akun yang terlewat
+
+SIKLUS WAKTU RAIN:
+30:00 → 2:01 = FASE TUNGGU (JANGAN KLIK)
+2:00 → 0:00 = FASE KLAIM (BOLEH KLIK) 
+0:00 → Reset ke 30:00 = SIKLUS BARU
+
+╔══════════════════════════════════════════════════════════════╗
+║                 2. QUEUE MANAGEMENT SYSTEM                  ║
+╚══════════════════════════════════════════════════════════════╝
+
+A. STATUS TRACKING AKUN:
+------------------------
+✅ CLAIMED    = Sudah berhasil klaim sesi ini
+⏳ PENDING    = Belum klaim, masuk queue  
+❌ FAILED     = Gagal klaim, retry next cycle
+🔄 PROCESSING = Sedang proses klaim
+⏸️ COOLDOWN   = Sudah klaim, tunggu sesi berikutnya
+🚫 BLOCKED    = Error berkali-kali, skip sementara
+
+B. PRIORITY QUEUE SYSTEM:
+-------------------------
+PRIORITY 1 (HIGHEST): Akun yang gagal klaim sesi sebelumnya
+PRIORITY 2 (HIGH):     Akun yang belum pernah klaim hari ini  
+PRIORITY 3 (MEDIUM):   Akun normal rotation
+PRIORITY 4 (LOW):      Akun yang sudah klaim tapi mau retry
+
+C. SMART DISTRIBUTION ALGORITHM:
+--------------------------------
+Input: N akun, M Chromium, Window 2 menit (120 detik)
+Waktu per batch = 120 / ceil(N/M) detik
+Batch size = M akun per batch
+
+Contoh: 10 akun, 3 Chromium
+- Batch 1 (2:00-1:30): Akun priority 1,2,3 (30 detik)
+- Batch 2 (1:30-1:00): Akun priority 4,5,6 (30 detik)  
+- Batch 3 (1:00-0:30): Akun priority 7,8,9 (30 detik)
+- Batch 4 (0:30-0:00): Akun priority 10 + retry (30 detik)
+
+╔══════════════════════════════════════════════════════════════╗
+║                3. ELEMENT DETECTION & VALIDATION            ║
+╚══════════════════════════════════════════════════════════════╝
+
+A. RAIN STATUS DETECTION:
+-------------------------
+SIAP KLAIM (AKTIF):
+- Selector: button[class*="active"] .tss-u5kou5-prizeBox.active
+- Validation: class mengandung "active"
+
+BELUM SIAP (TIDAK AKTIF):  
+- Selector: .tss-u5kou5-prizeBox:not(.active)
+- Validation: class tidak mengandung "active"
+
+B. WAKTU COUNTDOWN DETECTION:
+-----------------------------
+- Selector: .tss-1dvib57-timeBox span
+- Format: MM:SS (menit:detik)
+- Parse: parseInt(MM) * 60 + parseInt(SS)
+
+C. VALIDASI KLIK (DOUBLE VALIDATION):
+------------------------------------
+KONDISI WAJIB (KEDUANYA HARUS TRUE):
+1. Element memiliki class "active" 
+2. Waktu dalam rentang 0-120 detik (2:00 - 0:00)
+
+PSEUDO CODE:
+```
+function canClick(element, timeText) {
+    hasActive = element.classList.contains('active')
+    timeSeconds = parseTime(timeText) // MM:SS to seconds
+    validTime = timeSeconds >= 0 && timeSeconds <= 120
+    return hasActive && validTime
+}
+```
+
+╔══════════════════════════════════════════════════════════════╗
+║                    4. TIMING STRATEGY                       ║
+╚══════════════════════════════════════════════════════════════╝
+
+A. PRE-LOADING PHASE (2:30 - 2:01):
+-----------------------------------
+- Load semua akun yang masuk queue
+- Prepare Chromium instances  
+- Check login status
+- Validate page elements
+- Sort priority queue
+
+B. KLAIM PHASE (2:00 - 0:00):
+-----------------------------
+SLOT 1 (2:00-1:30): Priority 1 accounts + Fast processors
+SLOT 2 (1:30-1:00): Priority 2 accounts + Medium processors  
+SLOT 3 (1:00-0:30): Priority 3 accounts + Slow processors
+SLOT 4 (0:30-0:00): Retry failed + Emergency queue
+
+C. POST-KLAIM PHASE (0:00 - 30:00):
+-----------------------------------
+- Update status semua akun
+- Generate statistics report
+- Prepare next cycle queue
+- Cleanup resources
+- Wait for next cycle
+
+╔══════════════════════════════════════════════════════════════╗
+║                 5. PARALLEL PROCESSING LOGIC                ║
+╚══════════════════════════════════════════════════════════════╝
+
+A. CHROMIUM MANAGEMENT:
+-----------------------
+```
+ChromiumPool {
+    instances: Array<ChromiumInstance>
+    queue: PriorityQueue<Account>
+    
+    async processAccount(account) {
+        instance = getAvailableInstance()
+        result = await instance.claimRain(account)
+        updateAccountStatus(account, result)
+        
+        if (result.success) {
+            moveToNextAccount()
+        } else {
+            addToRetryQueue(account)
+        }
+    }
+}
+```
+
+B. ACCOUNT ROTATION LOGIC:
+--------------------------
+```
+AccountManager {
+    accounts: Array<Account>
+    currentBatch: Array<Account>
+    
+    getNextBatch(chromiumCount) {
+        batch = priorityQueue.pop(chromiumCount)
+        return batch.filter(acc => acc.status != 'CLAIMED')
+    }
+    
+    updateStatus(account, status) {
+        account.status = status
+        account.lastUpdate = now()
+        saveToDatabase()
+    }
+}
+```
+
+╔══════════════════════════════════════════════════════════════╗
+║                   6. CAPTCHA HANDLING                       ║
+╚══════════════════════════════════════════════════════════════╝
+
+A. DETECTION METHODS:
+--------------------
+Method 1: iframe[src*="captcha"]
+Method 2: canvas[id*="captcha"] 
+Method 3: div[class*="captcha"]
+Method 4: Timeout detection (>5 detik tanpa response)
+
+B. CAPSOLVER INTEGRATION:
+-------------------------
+```
+CaptchaSolver {
+    apiKey: string
+    
+    async solveCaptcha(captchaData) {
+        taskId = await submitCaptcha(captchaData)
+        solution = await pollResult(taskId)
+        return solution
+    }
+    
+    async submitAnswer(solution) {
+        inputElement.value = solution
+        submitButton.click()
+        return await waitForResponse()
+    }
+}
+```
+
+C. FALLBACK STRATEGIES:
+-----------------------
+1. Capsolver API (Primary)
+2. Manual bypass methods (Secondary)  
+3. Skip dan retry next cycle (Tertiary)
+4. Mark account as problematic (Last resort)
+
+╔══════════════════════════════════════════════════════════════╗
+║                 7. RESPONSE HANDLING                        ║
+╚══════════════════════════════════════════════════════════════╝
+
+A. SUCCESS DETECTION:
+--------------------
+Selector: span:contains("succesfuly join rain")
+Alternative: span:contains("success")
+Timeout: 10 detik setelah klik/captcha solve
+Action: Update status → CLAIMED, next account
+
+B. ALREADY JOINED DETECTION:
+----------------------------
+Selector: span:contains("You have already entered this rain")
+Action: Update status → COOLDOWN, next account
+
+C. FAILURE DETECTION:
+--------------------
+Conditions: 
+- Timeout tanpa response (>15 detik)
+- Error message muncul
+- Page crash/reload
+Action: Update status → FAILED, add to retry queue
+
+╔══════════════════════════════════════════════════════════════╗
+║                8. MONITORING & STATISTICS                   ║
+╚═════��════════════════════════════════════════════════════════╝
+
+A. REAL-TIME DASHBOARD:
+-----------------------
+```
+Rain Status Dashboard:
+┌─────────────────────────────────────┐
+│ Sesi Rain #1234                     │
+│ Waktu sisa: 1:45                    │
+│ ─────────────────────────────────── │
+│ Total akun: 25                      │
+│ ✅ Sukses: 18                       │
+│ 🔄 Processing: 3                    │
+│ ⏳ Queue: 4                         │
+│ ❌ Failed: 0                        │
+│ ─────────────────────────────────── │
+│ Chromium aktif: 5/5                 │
+│ Captcha solved: 12                  │
+│ Success rate: 94.7%                 │
+└─────────────────────────────────────┘
+```
+
+B. PERFORMANCE METRICS:
+-----------------------
+- Average claim time per account
+- Captcha solve rate  
+- Success rate per session
+- Account performance ranking
+- Error frequency analysis
+
+C. DAILY STATISTICS:
+--------------------
+- Total sessions completed
+- Total claims successful  
+- Revenue/rewards earned
+- Account health status
+- System uptime percentage
+
+╔══════════════════════════════════════════════════════════════╗
+║                 9. ERROR HANDLING & RECOVERY                ║
+╚══════════════════════════════════════════════════════════════╝
+
+A. NETWORK ERRORS:
+------------------
+- Connection timeout → Retry dengan backoff
+- DNS resolution → Switch DNS/proxy
+- Rate limiting → Implement delays
+- Server error 5xx → Wait dan retry
+
+B. BROWSER ERRORS:
+------------------
+- Page crash → Restart Chromium instance
+- Element not found → Wait dengan timeout
+- JavaScript error → Reload page
+- Memory leak → Periodic restart
+
+C. ACCOUNT ERRORS:
+------------------
+- Login expired → Re-authenticate
+- Account banned → Mark as inactive
+- Captcha gagal → Try different solver
+- Multiple failures → Temporary blacklist
+
+D. RECOVERY STRATEGIES:
+-----------------------
+```
+ErrorRecovery {
+    maxRetries: 3
+    backoffDelay: [1, 3, 5] seconds
+    
+    async handleError(error, account) {
+        if (error.retryable && retries < maxRetries) {
+            await delay(backoffDelay[retries])
+            return retry(account)
+        } else {
+            markAccountProblematic(account)
+            moveToNextAccount()
+        }
+    }
+}
+```
+
+╔══════════════════════════════════════════════════════════════╗
+║                10. TELEGRAM BOT INTERFACE                   ║
+╚══════════════════════════════════════════════════════════════╝
+
+A. SETUP COMMANDS:
+------------------
+/start_rain <chromium_count> - Mulai rain claimer
+/stop_rain - Stop semua proses rain
+/restart_rain - Restart dengan config sama
+/status_rain - Lihat status real-time
+
+B. CONFIGURATION COMMANDS:
+--------------------------
+/set_chromium <count> - Set jumlah Chromium
+/set_capsolver <api_key> - Set Capsolver API key  
+/set_timeout <seconds> - Set timeout detection
+/set_priority <account> <level> - Set priority akun
+
+C. MONITORING COMMANDS:
+-----------------------
+/dashboard - Tampilkan dashboard real-time
+/stats - Statistik harian/mingguan
+/logs <count> - Lihat log terbaru
+/accounts - Status semua akun
+
+D. MAINTENANCE COMMANDS:
+------------------------
+/reload_accounts - Reload daftar akun
+/clear_queue - Clear priority queue
+/reset_stats - Reset statistik
+/backup_data - Backup data penting
+
+╔══════════════════════════════════════════════════════════════╗
+║                   11. FILE STRUCTURE                        ║
+╚══════════════════════════════════════════════════════════════╝
+
+A. INPUT FILES:
+---------------
+akunrain.txt     - List akun untuk rain (format: username:password)
+kunci.key        - Encryption key untuk keamanan
+akun.enc         - Encrypted account data
+config.json      - Konfigurasi bot (chromium count, timeouts, dll)
+
+B. OUTPUT FILES:
+----------------
+rain_logs.txt    - Log file dengan timestamp
+rain_stats.json  - Statistik dan metrics
+rain_queue.json  - Status queue dan priority
+rain_session.json - Data sesi aktif
+
+C. TEMPORARY FILES:
+-------------------
+temp_captcha/    - Folder temporary captcha images
+chromium_profiles/ - Profile Chromium untuk setiap akun
+session_data/    - Data sesi browser
+
+╔══════════════════════════════════════════════════════════════╗
+║                 12. IMPLEMENTATION FLOW                     ║
+╚══════════════════════════════════════════════════════════════╝
+
+STEP 1: INITIALIZATION
+----------------------
+1. Load akun dari akunrain.txt
+2. Decrypt credentials
+3. Initialize Chromium pool
+4. Setup Capsolver API
+5. Create priority queue
+6. Start Telegram bot listener
+
+STEP 2: PRE-CYCLE PREPARATION (30:00 - 2:01)
+--------------------------------------------
+1. Monitor waktu countdown
+2. Prepare akun yang masuk queue
+3. Sort berdasarkan priority
+4. Pre-load browser instances
+5. Validate login status
+6. Calculate batch distribution
+
+STEP 3: CLAIM CYCLE EXECUTION (2:00 - 0:00)
+-------------------------------------------
+1. Start parallel processing
+2. Execute batch sesuai time slot
+3. Monitor setiap akun progress
+4. Handle captcha otomatis
+5. Update status real-time
+6. Manage retry queue
+
+STEP 4: POST-CYCLE CLEANUP (0:00 - 30:00)
+-----------------------------------------
+1. Collect semua results
+2. Update account status
+3. Generate statistics
+4. Prepare next cycle queue
+5. Cleanup resources
+6. Send report ke Telegram
+
+STEP 5: LOOP MANAGEMENT
+-----------------------
+1. Wait for next cycle
+2. Health check semua components
+3. Rotate problematic accounts
+4. Update configurations
+5. Restart jika diperlukan
+
+╔══════════════════════════════════════════════════════════════╗
+║                13. PERFORMANCE OPTIMIZATION                 ║
+╚══════════════════════════════════════════════════════════════╝
+
+A. MEMORY MANAGEMENT:
+--------------------
+- Periodic garbage collection
+- Browser instance recycling  
+- Cache cleanup setiap cycle
+- Memory usage monitoring
+
+B. CPU OPTIMIZATION:
+-------------------
+- Async/await untuk I/O operations
+- Worker threads untuk heavy tasks
+- Process pooling untuk isolation
+- Load balancing antar cores
+
+C. NETWORK OPTIMIZATION:
+------------------------
+- Connection pooling
+- Request batching
+- Compression enabled
+- CDN untuk static assets
+
+D. BROWSER OPTIMIZATION:
+------------------------
+- Headless mode default
+- Disable images/css untuk speed
+- Custom user agents
+- Optimized viewport size
+
+╔══════════════════════════════════════════════════════════════╗
+║                  14. SECURITY MEASURES                      ║
+╚══════════════════════════════════════════════════════════════╝
+
+A. CREDENTIAL PROTECTION:
+-------------------------
+- AES encryption untuk passwords
+- Secure key storage
+- No plaintext credentials
+- Regular key rotation
+
+B. ANTI-DETECTION:
+------------------
+- Random user agents
+- Human-like delays
+- Mouse movement simulation
+- Fingerprint randomization
+
+C. API SECURITY:
+----------------
+- Encrypted API communications
+- Rate limiting compliance
+- Secure token storage
+- Request signing
+
+╔══════════════════════════════════════════════════════════════╗
+║                    15. TESTING STRATEGY                     ║
+╚══════════════════════════════════════════════════════════════╝
+
+A. UNIT TESTS:
+--------------
+- Element detection functions
+- Time parsing utilities
+- Queue management logic
+- Status update mechanisms
+
+B. INTEGRATION TESTS:
+--------------------
+- Chromium automation flow
+- Captcha solving pipeline
+- Telegram bot responses
+- Database operations
+
+C. STRESS TESTS:
+----------------
+- Multiple accounts simultaneously
+- High captcha frequency scenarios
+- Network failure recovery
+- Memory leak detection
+
+╔══════════════════════════════════════════════════════════════╗
+║                   16. DEPLOYMENT GUIDE                      ║
+╚══════════════════════════════════════════════════════════════╝
+
+A. SYSTEM REQUIREMENTS:
+-----------------------
+- Python 3.8+
+- Chromium/Chrome browser
+- 4GB+ RAM (untuk multiple instances)
+- Stable internet connection
+- VPS/dedicated server recommended
+
+B. INSTALLATION STEPS:
+----------------------
+1. Clone repository
+2. Install dependencies: pip install -r requirements.txt
+3. Setup Chromium driver
+4. Configure Telegram bot token
+5. Setup Capsolver API key
+6. Prepare account files
+7. Run initial tests
+8. Start production mode
+
+C. MONITORING SETUP:
+--------------------
+- Setup log rotation
+- Configure alerts
+- Monitor resource usage
+- Setup backup schedules
+- Health check endpoints
+
+=== END DOKUMENTASI SISTEM RAIN V2.0 ===
+
+CATATAN PENTING:
+- Sistem ini dirancang untuk memastikan SEMUA akun mendapat kesempatan klaim
+- Priority queue memastikan akun yang gagal diprioritaskan di sesi berikutnya  
+- Smart timing mencegah akun terlewat dalam window 2 menit
+- Monitoring real-time membantu optimasi performance
+- Error handling yang robust untuk operasi 24/7

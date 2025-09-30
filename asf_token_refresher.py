@@ -1,18 +1,32 @@
+# asf_token_refresher.py — FINAL (Seed Dihapus) — Private Key Flow + Back-Compat API
+# - add_accounts_via_seed() & refresh_invalid_tokens(): tetap ada (tidak ubah bot_module.py).
+# - Flow 100% PRIVATE KEY (load_seed_phrases(): name -> private_key).
+# - Retry 100x/step + delay 0.5–1.0s.
+# - Setelah Approve: tunggu flip.gg idle & cek token dulu; kalau belum ada → reload & mini-retry.
+# - Auto-handle "Wallet not connected!".
+# - Update akun.enc (replace token jika name ada; kalau tidak, append).
+# - Semua input via PASTE (fill), tidak ketik per karakter.
+# - Onboard seed dummy: tombol Paste; fallback isi 12 kolom.
+# - Setelah Import PK: langsung klik wallet pada SECTION "Imported" (skip arrow-right).
+# - Connect/Approve: HANYA di surface Solflare (popup/iframe), bukan modal/toolbar flip.gg.
+# - Log Telegram VERBOSE (tiap langkah ✅/❌ + error/traceback).
+
 import asyncio
 import random
 import traceback
 from typing import Any, Dict, List, Optional, Tuple
+
 from playwright.async_api import async_playwright
 
 from asf_core import (
     load_accounts,
-    load_seed_phrases,
+    load_seed_phrases,  # mapping: name -> private_key
     save_accounts,
-    update_account_token,
 )
 from asf_core import (
     send_telegram as core_send_telegram,
 )
+
 
 # ====================== Telegram (verbose) ======================
 async def send_telegram(text: str, context=None):
@@ -21,6 +35,7 @@ async def send_telegram(text: str, context=None):
             await core_send_telegram(str(text), context)
     except Exception:
         pass
+
 
 # ====================== Timing / Retry ======================
 def _rand_delay(lo: float = 0.5, hi: float = 1.0) -> float:
@@ -33,8 +48,10 @@ def _rand_delay(lo: float = 0.5, hi: float = 1.0) -> float:
         lo, hi = 0.5, 1.0
     return random.uniform(lo, hi)
 
+
 async def _sleep(lo: float = 0.5, hi: float = 1.0) -> None:
     await asyncio.sleep(_rand_delay(lo, hi))
+
 
 async def wait_and_click(ctx, selectors: List[str], step: str, max_retry: int = 100) -> bool:
     for _ in range(max_retry):
@@ -43,19 +60,15 @@ async def wait_and_click(ctx, selectors: List[str], step: str, max_retry: int = 
                 el = await ctx.query_selector(sel)
                 if not el:
                     continue
-                
                 vis = await el.is_visible() if hasattr(el, "is_visible") else True
                 ena = await el.is_enabled() if hasattr(el, "is_enabled") else True
                 if not (vis and ena):
                     continue
-                
                 try:
                     await el.scroll_into_view_if_needed()
                 except Exception:
                     pass
-                
                 await asyncio.sleep(0.1)
-                
                 try:
                     await el.click()
                 except Exception:
@@ -70,16 +83,15 @@ async def wait_and_click(ctx, selectors: List[str], step: str, max_retry: int = 
                         except Exception:
                             await _sleep()
                             continue
-                
                 await send_telegram(f"✅ Klik {step}")
                 await _sleep()
                 return True
             except Exception:
                 continue
         await _sleep()
-    
     await send_telegram(f"❌ Gagal klik {step} setelah {max_retry}x")
     return False
+
 
 async def wait_and_paste(ctx, selector: str, value: str, step: str, max_retry: int = 100) -> bool:
     for _ in range(max_retry):
@@ -90,24 +102,21 @@ async def wait_and_paste(ctx, selector: str, value: str, step: str, max_retry: i
                     await el.scroll_into_view_if_needed()
                 except Exception:
                     pass
-                
                 await asyncio.sleep(0.1)
-                
                 try:
                     await el.fill(value)  # paste langsung
                 except Exception:
                     await _sleep()
                     continue
-                
                 await send_telegram(f"✅ Paste {step}")
                 await _sleep()
                 return True
         except Exception:
             pass
         await _sleep()
-    
     await send_telegram(f"❌ Gagal paste {step} setelah {max_retry}x")
     return False
+
 
 async def wait_visible_any(ctx, selectors: List[str], max_retry: int = 100) -> bool:
     for _ in range(max_retry):
@@ -123,6 +132,7 @@ async def wait_visible_any(ctx, selectors: List[str], max_retry: int = 100) -> b
         await _sleep(0.5, 0.9)
     return False
 
+
 # ====================== Seed dummy (onboard) ======================
 async def paste_seed_dummy(page, seed_phrase: str) -> bool:
     # 1) tombol "Paste" bawaan
@@ -131,7 +141,6 @@ async def paste_seed_dummy(page, seed_phrase: str) -> bool:
             await page.context.grant_permissions(["clipboard-read", "clipboard-write"])
         except Exception:
             pass
-        
         try:
             await page.evaluate(
                 """async (t)=>{try{await navigator.clipboard.writeText(t);return true;}catch(e){return false;}}""",
@@ -139,11 +148,9 @@ async def paste_seed_dummy(page, seed_phrase: str) -> bool:
             )
         except Exception:
             pass
-        
         ok_btn = await wait_and_click(
             page, ["button:has-text('Paste')", "text=Paste"], "Paste Seed Dummy"
         )
-        
         if ok_btn:
             for _ in range(40):
                 v1 = await page.get_attribute('[data-testid="input-recovery-phrase-1"]', "value")
@@ -154,24 +161,22 @@ async def paste_seed_dummy(page, seed_phrase: str) -> bool:
                 await _sleep(0.2, 0.4)
     except Exception:
         pass
-    
     # 2) fallback isi 12 kolom
     try:
         words = [w.strip() for w in seed_phrase.split() if w.strip()]
         if len(words) != 12:
             await send_telegram("❌ Seed Dummy bukan 12 kata (fallback batal)")
             return False
-        
         for i, w in enumerate(words, start=1):
             sel = f'[data-testid="input-recovery-phrase-{i}"]'
             if not await wait_and_paste(page, sel, w, f"Seed Dummy #{i}"):
                 return False
-        
         await send_telegram("✅ Seed Dummy via fallback 12 kolom")
         return True
     except Exception:
         await send_telegram(f"❌ Gagal fallback Seed Dummy\n{traceback.format_exc()}")
         return False
+
 
 # ====================== Wallet pickers ======================
 async def _select_wallet_by_name(page, name: str) -> bool:
@@ -196,10 +201,15 @@ async def _select_wallet_by_name(page, name: str) -> bool:
         await _sleep()
     return False
 
+
 async def _click_imported_wallet(page, name: str) -> bool:
-    """Klik wallet pada SECTION 'Imported'."""
+    """
+    Klik wallet pada SECTION 'Imported'.
+      1) strict: cari title sama persis di container Imported
+      2) fallback: klik first wallet di Imported
+      3) fallback terakhir: cari global by name
+    """
     target = (name or "").strip().lower()
-    
     await wait_visible_any(
         page,
         [
@@ -209,7 +219,6 @@ async def _click_imported_wallet(page, name: str) -> bool:
         ],
         max_retry=100,
     )
-    
     # 1) strict in-section
     try:
         handle = await page.evaluate_handle(
@@ -226,7 +235,6 @@ async def _click_imported_wallet(page, name: str) -> bool:
             }""",
             target,
         )
-        
         if handle:
             el = handle.as_element()
             if el:
@@ -242,7 +250,6 @@ async def _click_imported_wallet(page, name: str) -> bool:
                 return True
     except Exception:
         pass
-    
     # 2) first-in-section
     try:
         first = await page.evaluate_handle(
@@ -252,7 +259,6 @@ async def _click_imported_wallet(page, name: str) -> bool:
                 return sec.querySelector('button[data-testid^="li-wallets-"]') || null;
             }"""
         )
-        
         if first:
             el = first.as_element()
             if el:
@@ -268,16 +274,15 @@ async def _click_imported_wallet(page, name: str) -> bool:
                 return True
     except Exception:
         pass
-    
     # 3) global
     if await _select_wallet_by_name(page, name):
         await send_telegram(f"⚠️ Fallback global: pilih wallet {name}")
         return True
-    
     await send_telegram(f"❌ Gagal pilih wallet Imported: {name}")
     return False
 
-# ====================== Solflare surfaces ======================
+
+# ====================== Solflare surfaces (frame & popup page) ======================
 def _solflare_frames(page) -> List[Any]:
     try:
         return [
@@ -287,6 +292,7 @@ def _solflare_frames(page) -> List[Any]:
         ]
     except Exception:
         return []
+
 
 def _solflare_pages(page) -> List[Any]:
     try:
@@ -301,8 +307,9 @@ def _solflare_pages(page) -> List[Any]:
     except Exception:
         return []
 
+
 async def _click_on_solflare_only(page, selectors: List[str], step: str, tries: int = 100) -> bool:
-    """Klik hanya di surface Solflare (popup/iframe)."""
+    """Klik hanya di surface Solflare (popup/iframe). Tidak menyentuh main page flip.gg."""
     for _ in range(tries):
         # popup pages
         try:
@@ -323,7 +330,6 @@ async def _click_on_solflare_only(page, selectors: List[str], step: str, tries: 
                         continue
         except Exception:
             pass
-        
         # frames
         try:
             for fr in _solflare_frames(page):
@@ -343,11 +349,10 @@ async def _click_on_solflare_only(page, selectors: List[str], step: str, tries: 
                         continue
         except Exception:
             pass
-        
         await _sleep()
-    
     await send_telegram(f"❌ Gagal {step} (Solflare) setelah {tries}x")
     return False
+
 
 # ====================== JWT util + token polling ======================
 def _is_jwt(s: Optional[str]) -> bool:
@@ -362,6 +367,7 @@ def _is_jwt(s: Optional[str]) -> bool:
     except Exception:
         return False
 
+
 async def _try_get_token(page, attempts: int = 40) -> Optional[str]:
     """Polling token dari localStorage/sessionStorage tanpa reload."""
     for _ in range(attempts):
@@ -371,100 +377,97 @@ async def _try_get_token(page, attempts: int = 40) -> Optional[str]:
             )
         except Exception:
             tok = None
-        
         if _is_jwt(tok):
             return tok
-        
         await _sleep(0.6, 1.0)
-    
     return None
+
 
 # ====================== Login via Private Key ======================
 async def login_with_private_key(browser, account_name: str, private_key: str) -> Optional[str]:
-    """Login dengan private key dan return token JWT"""
+    """
+    1) Onboard -> seed dummy -> password -> Quick setup -> I agree
+    2) Import PK -> klik wallet di 'Imported'
+    3) flip.gg -> Connect (.tss-47m19k-connect) -> Solflare -> Use Web Wallet -> (popup/frame Solflare) Connect -> Approve
+    4) Setelah Approve: tunggu load & cek token. Kalau belum ada → handle 'Wallet not connected!' & reload.
+    """
     ctx = await browser.new_context()
     page = await ctx.new_page()
-    in_solflare_phase = False
-    
+    in_solflare_phase = False  # guard agar tidak ada klik di main page setelah UWW
     try:
         # 1) Onboard
         await send_telegram(f"🌐 {account_name} | Buka Solflare Onboard")
         await page.goto("https://solflare.com/onboard/access", timeout=60000)
         await _sleep()
-        
+
         seed_dummy = "net ill reflect stomach abuse satoshi pilot pact unusual leg canvas auction"
         if not await paste_seed_dummy(page, seed_dummy):
             await send_telegram(f"❌ {account_name} | Gagal isi seed dummy")
             return None
-        
+
         if not await wait_and_click(page, ['[data-testid="btn-continue"]'], "Continue (Seed)"):
             return None
-        
+
         if not await wait_and_paste(
             page, '[data-testid="input-new-password"]', "fatoni11", "Password Baru"
         ):
             return None
-        
         if not await wait_and_paste(
             page, '[data-testid="input-repeat-password"]', "fatoni11", "Ulangi Password"
         ):
             return None
-        
+
         if not await wait_and_click(page, ['[data-testid="btn-continue"]'], "Continue (Password)"):
             return None
-        
+
         if not await wait_and_click(page, ['[data-testid="btn-quick-setup"]'], "Quick setup"):
             return None
-        
-        if not await wait_and_click(page, ['[data-testid="btn-explore"]'], "I agree, let's go"):
+
+        if not await wait_and_click(page, ['[data-testid="btn-explore"]'], "I agree, let’s go"):
             return None
-        
+
         # 2) Import PK
         await send_telegram(f"🔑 {account_name} | Import Private Key")
         await page.goto(
             "https://solflare.com/wallet-management/options/import/private-key", timeout=60000
         )
         await _sleep()
-        
+
         if not await wait_and_paste(
             page, '[data-testid="input-name"]', account_name, "Wallet Name"
         ):
             return None
-        
         if not await wait_and_paste(
             page, '[data-testid="input-private-key"]', private_key, "Private Key"
         ):
             return None
-        
         if not await wait_and_click(page, ['[data-testid="btn-import"]'], "Import"):
             return None
-        
+
         # tunggu /wallet-management & pilih wallet Imported
         try:
             await page.wait_for_url("**/wallet-management**", timeout=20000)
         except Exception:
             pass
-        
         if not await _click_imported_wallet(page, account_name):
             return None
-        
-        # 3) flip.gg connect
+
+        # 3) flip.gg connect (HANYA tombol khusus di toolbar)
         await send_telegram(f"🌐 {account_name} | Buka flip.gg")
         await page.goto("https://flip.gg/", timeout=60000)
         await _sleep(0.7, 1.0)
-        
-        # Connect wallet button
+
+        # ← tombol awal buat munculin pilihan wallet: PAKAI class spesifik
         if not await wait_and_click(page, [".tss-47m19k-connect"], "Connect Wallet (toolbar)"):
             return None
-        
         if not await wait_and_click(
             page,
             ["button:has-text('Solflare')", ".wallet-adapter-button:has-text('Solflare')"],
             "Pilih Solflare",
         ):
             return None
-        
-        # Use Web Wallet
+
+        # Use Web Wallet → masuk fase solflare only
         if not await _click_on_solflare_only(
             page,
             [
@@ -477,10 +480,9 @@ async def login_with_private_key(browser, account_name: str, private_key: str) -
             tries=100,
         ):
             return None
-        
-        in_solflare_phase = True
-        
-        # CONNECT (Solflare only)
+        in_solflare_phase = True  # mulai guard — jangan sentuh main page sampai approve selesai
+
+        # CONNECT (Solflare only) — retry 100x
         if not await _click_on_solflare_only(
             page,
             ["button[data-testid='btn-connect']", "button:has-text('Connect')", "text=Connect"],
@@ -488,8 +490,8 @@ async def login_with_private_key(browser, account_name: str, private_key: str) -
             tries=100,
         ):
             return None
-        
-        # APPROVE (Solflare only)
+
+        # APPROVE (Solflare only) — retry 100x
         if not await _click_on_solflare_only(
             page,
             ["button[data-testid='btn-approve']", "button:has-text('Approve')", "text=Approve"],
@@ -497,19 +499,17 @@ async def login_with_private_key(browser, account_name: str, private_key: str) -
             tries=100,
         ):
             return None
-        
-        in_solflare_phase = False
-        
-        # Tunggu token
+        in_solflare_phase = False  # selesai fase solflare
+
+        # Setelah APPROVE → tunggu idle & cek token (tanpa refresh dulu)
         try:
             await page.wait_for_load_state("networkidle", timeout=15000)
         except Exception:
             pass
-        
         token = await _try_get_token(page, attempts=40)
-        
+
+        # Jika belum ada, handle error "Wallet not connected!" lalu mini-retry, baru refresh
         if not _is_jwt(token):
-            # Handle "Wallet not connected!" error
             try:
                 for _ in range(3):
                     err = await page.query_selector("text='Wallet not connected!'")
@@ -519,19 +519,16 @@ async def login_with_private_key(browser, account_name: str, private_key: str) -
                         )
                         await page.reload()
                         await _sleep(0.7, 1.0)
-                        
-                        # Retry connect
+                        # buka ulang koneksi (toolbar saja, spesifik)
                         if not await wait_and_click(
                             page, [".tss-47m19k-connect"], "Connect Wallet (retry)"
                         ):
                             break
-                        
                         if not await wait_and_click(
                             page, ["button:has-text('Solflare')"], "Pilih Solflare (retry)"
                         ):
                             break
-                        
-                        # Retry Solflare flow
+                        # kembali ke solflare phase
                         if not await _click_on_solflare_only(
                             page,
                             [
@@ -544,7 +541,6 @@ async def login_with_private_key(browser, account_name: str, private_key: str) -
                             tries=100,
                         ):
                             break
-                        
                         if not await _click_on_solflare_only(
                             page,
                             [
@@ -556,7 +552,6 @@ async def login_with_private_key(browser, account_name: str, private_key: str) -
                             tries=100,
                         ):
                             break
-                        
                         if not await _click_on_solflare_only(
                             page,
                             [
@@ -568,12 +563,10 @@ async def login_with_private_key(browser, account_name: str, private_key: str) -
                             tries=100,
                         ):
                             break
-                        
                         try:
                             await page.wait_for_load_state("networkidle", timeout=10000)
                         except Exception:
                             pass
-                        
                         token = await _try_get_token(page, attempts=20)
                         if _is_jwt(token):
                             break
@@ -581,29 +574,29 @@ async def login_with_private_key(browser, account_name: str, private_key: str) -
                         break
             except Exception:
                 pass
-        
+
         if not _is_jwt(token):
             await send_telegram(f"ℹ️ {account_name} | Token belum muncul, refresh sekali")
             await page.reload()
             await _sleep(0.7, 1.0)
             token = await _try_get_token(page, attempts=40)
-        
+
         if _is_jwt(token):
             await send_telegram(f"✅ {account_name} | Token berhasil diperbarui")
             return token
-        
         await send_telegram(f"❌ {account_name} | Token tidak ditemukan")
         return None
-    
+
     except Exception as e:
+        # kalau guard aktif, pastikan tidak ada klik ke main page di blok except
         await send_telegram(f"❌ {account_name} | Error: {e}\n{traceback.format_exc()}")
         return None
-    
     finally:
         try:
             await ctx.close()
         except Exception:
             pass
+
 
 # ====================== Back-Compat APIs ======================
 async def refresh_invalid_tokens(
@@ -612,57 +605,69 @@ async def refresh_invalid_tokens(
     log_func: Optional[Any] = None,
     stop_event: Optional[Any] = None,
     invalid_names: Optional[List[str]] = None,
-    max_concurrency: int = 1,  # Reduced for stability
+    max_concurrency: int = 2,  # <— default aman 2-3
 ):
-    """Refresh token untuk akun yang invalid"""
     akun_list = load_accounts() or []
     akun_map = {(a.get("name") or "").strip().lower(): a for a in akun_list}
     pk_map = load_seed_phrases() or {}
     pk_norm: Dict[str, str] = {k.strip(): v.strip() for k, v in pk_map.items() if k and v}
-    
+
     if invalid_names:
         s = set([n.strip().lower() for n in invalid_names if n.strip()])
         target_names = [n for n in pk_norm.keys() if n.strip().lower() in s]
     else:
         target_names = list(pk_norm.keys())
-    
+
     if not target_names:
         await send_telegram("ℹ️ Tidak ada akun yang perlu diproses.", context)
         return
-    
+
     await send_telegram(f"▶️ Mulai refresh (Private Key): {len(target_names)} akun", context)
-    
+
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(headless=headless)
-        
+
+        lock = asyncio.Lock()  # proteksi write akun.enc
+        sem = asyncio.Semaphore(max_concurrency)
+
         updated = 0
         failed = 0
-        
-        for name in target_names:
-            pk = pk_norm.get(name, "")
-            if not pk:
-                await send_telegram(f"❌ {name} | Private key tidak ditemukan", context)
-                failed += 1
-                continue
-            
-            token = await login_with_private_key(browser, name, pk)
-            if token and _is_jwt(token):
-                # Update token in akun.txt
-                if update_account_token(name, token):
+
+        async def worker(name: str):
+            nonlocal updated, failed
+            async with sem:
+                pk = pk_norm.get(name, "")
+                if not pk:
+                    await send_telegram(f"❌ {name} | Private key tidak ditemukan", context)
+                    failed += 1
+                    return
+                token = await login_with_private_key(browser, name, pk)
+                if token and _is_jwt(token):
+                    async with lock:
+                        key = name.strip().lower()
+                        if key in akun_map:
+                            akun_map[key]["token"] = token
+                        else:
+                            akun_list.append({"name": name, "token": token})
+                            akun_map[key] = akun_list[-1]
+                        try:
+                            save_accounts(akun_list)
+                        except Exception:
+                            pass
                     updated += 1
                     await send_telegram(f"✅ {name} | Token berhasil diperbarui", context)
                 else:
                     failed += 1
-                    await send_telegram(f"❌ {name} | Gagal update token ke file", context)
-            else:
-                failed += 1
-                await send_telegram(f"❌ {name} | Gagal refresh token", context)
-        
+                    await send_telegram(f"❌ {name} | Gagal refresh token", context)
+
         try:
-            await browser.close()
-        except Exception:
-            pass
-    
+            await asyncio.gather(*(worker(n) for n in target_names))
+        finally:
+            try:
+                await browser.close()
+            except Exception:
+                pass
+
     await send_telegram(
         f"🎉 Refresh selesai!\n"
         f"✅ Berhasil: {updated}\n"
@@ -671,18 +676,18 @@ async def refresh_invalid_tokens(
         context,
     )
 
+
 async def add_accounts_via_seed(
     headless: bool = True,
     context: Optional[Any] = None,
     log_func: Optional[Any] = None,
     stop_event: Optional[Any] = None,
-    max_concurrency: int = 1,
+    max_concurrency: int = 2,  # gunakan nilai >1 untuk paralel
 ) -> Dict[str, Any]:
-    """Tambah akun baru via private key"""
     akun_list = load_accounts() or []
     existing = {(a.get("name") or "").strip().lower() for a in akun_list}
+
     pk_map = load_seed_phrases() or {}
-    
     candidates: List[Tuple[str, str]] = []
     if isinstance(pk_map, dict):
         for name, pk in pk_map.items():
@@ -693,44 +698,53 @@ async def add_accounts_via_seed(
             if n.lower() in existing:
                 continue
             candidates.append((n, p))
-    
+
     await send_telegram(f"📦 Kandidat akun baru (via Private Key): {len(candidates)}", context)
-    
     if not candidates:
         return {"candidates": 0, "added": 0, "failed": 0}
-    
+
     added = 0
     failed = 0
-    
+
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(headless=headless)
-        
-        for name, pk in candidates:
+
+        lock = asyncio.Lock()
+        sem = asyncio.Semaphore(max_concurrency)
+
+        async def worker(name: str, pk: str):
+            nonlocal added, failed, existing
             if log_func:
                 try:
                     log_func(f"➕ Add via PK: {name}")
                 except Exception:
                     pass
-            
             await send_telegram(f"🔄 {name} | Login via Private Key (add)", context)
-            
-            token = await login_with_private_key(browser, name, pk)
-            if token and _is_jwt(token):
-                if update_account_token(name, token):
-                    added += 1
+
+            async with sem:
+                token = await login_with_private_key(browser, name, pk)
+                if token and _is_jwt(token):
+                    async with lock:
+                        akun_list.append({"name": name, "token": token})
+                        try:
+                            save_accounts(akun_list)
+                        except Exception:
+                            pass
+                        added += 1
+                        existing.add(name.strip().lower())
                     await send_telegram(f"✅ Ditambahkan: {name}", context)
                 else:
                     failed += 1
-                    await send_telegram(f"❌ Gagal simpan ke file: {name}", context)
-            else:
-                failed += 1
-                await send_telegram(f"❌ Gagal ambil token: {name}", context)
-        
+                    await send_telegram(f"❌ Gagal ambil token: {name}", context)
+
         try:
-            await browser.close()
-        except Exception:
-            pass
-    
+            await asyncio.gather(*(worker(n, pk) for n, pk in candidates))
+        finally:
+            try:
+                await browser.close()
+            except Exception:
+                pass
+
     await send_telegram(
         "🎉 Tambah akun via Private Key selesai!\n"
         f"✅ Berhasil: {added}\n"
@@ -738,12 +752,13 @@ async def add_accounts_via_seed(
         f"📊 Total kandidat: {len(candidates)}",
         context,
     )
-    
     return {"candidates": len(candidates), "added": added, "failed": failed}
 
-# ====================== Quick test ======================
+
+# ====================== Quick test (manual) ======================
 async def _test():
     await refresh_invalid_tokens(headless=False)
+
 
 if __name__ == "__main__":
     asyncio.run(_test())

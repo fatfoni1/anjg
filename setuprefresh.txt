@@ -1,0 +1,386 @@
+# SETUP REFRESH TOKEN - FLIP.GG + SOLFLARE
+# Dokumentasi lengkap semua element dan langkah untuk refresh token otomatis
+# Dibuat berdasarkan hasil inspect element manual
+
+## ==========================================
+## ALUR LENGKAP REFRESH TOKEN
+## ==========================================
+
+### LANGKAH 1: BUKA FLIP.GG
+- URL: https://flip.gg
+- Tunggu halaman load: await page.wait_for_load_state("domcontentloaded")
+- Delay: 2-3 detik
+
+### LANGKAH 2: KLIK TOMBOL "CONNECT WALLET"
+Element #1 - Tombol Connect Wallet:
+```html
+<a aria-current="page" class="tss-1k7aji9-noLink active" href="/" style="margin: auto;">
+  <button class="MuiButtonBase-root MuiButton-root MuiButton-contained MuiButton-containedPrimary MuiButton-sizeMedium MuiButton-containedSizeMedium MuiButton-colorPrimary MuiButton-root MuiButton-contained MuiButton-containedPrimary MuiButton-sizeMedium MuiButton-containedSizeMedium MuiButton-colorPrimary tss-23jjxc-selectWallet mui-1hw9j7s" tabindex="0" type="button">
+    <svg class="svg-inline--fa fa-right-to-bracket" ...>
+    <span style="font-weight: 450;">Connect</span>
+  </button>
+</a>
+```
+
+Selector yang bisa digunakan:
+- `.tss-23jjxc-selectWallet` (RECOMMENDED - class unik)
+- `button:has-text('Connect')`
+- `.MuiButton-root:has-text('Connect')`
+- `button[class*='selectWallet']`
+
+### LANGKAH 3: PILIH SOLFLARE DARI DAFTAR WALLET
+Element #2 - Daftar Wallet (Solflare):
+```html
+<ul class="wallet-adapter-modal-list">
+  <li>
+    <button class="wallet-adapter-button " tabindex="0" type="button">
+      <i class="wallet-adapter-button-start-icon">
+        <img src="data:image/svg+xml;base64,..." alt="Solflare icon">
+      </i>
+      Solflare
+    </button>
+  </li>
+</ul>
+```
+
+Selector yang bisa digunakan:
+- `button:has-text('Solflare')` (RECOMMENDED)
+- `.wallet-adapter-button:has-text('Solflare')`
+- `img[alt="Solflare icon"]` (kemudian parent button)
+- `.wallet-adapter-modal-list li:first-child button`
+
+### LANGKAH 4: KLIK "USE WEB WALLET"
+Element #3 - Pilihan Solflare:
+```html
+<div class="css-163hoyy">
+  <a id="download-extension-link" href="https://chromewebstore.google.com/detail/solflare-wallet/bhhhlbepdkbapadjdnnojkbgioiodbic" target="_blank" rel="noopener" class="css-1aji0yd">
+    Get Extension
+  </a>
+  <a id="connect-web-button" rel="noopener" class="css-dxb75a">
+    Use Web Wallet
+  </a>
+</div>
+```
+
+Selector yang bisa digunakan:
+- `#connect-web-button` (RECOMMENDED - ID unik)
+- `a:has-text('Use Web Wallet')`
+- `.css-dxb75a`
+- `a[id="connect-web-button"]`
+
+### LANGKAH 5: KLIK "I ALREADY HAVE A WALLET"
+Element #4 - Pilihan Import Wallet:
+```html
+<span class="_9rd95r0">I already have a wallet</span>
+```
+
+Selector yang bisa digunakan:
+- `span:has-text('I already have a wallet')` (RECOMMENDED)
+- `._9rd95r0`
+- `span[class="_9rd95r0"]`
+- `:text('I already have a wallet')`
+
+### LANGKAH 6: ISI SEED PHRASE
+Element #5 - Input Field Seed Phrase (12 Kata):
+```html
+<div class="f7bvv70 f7bvv71" data-testid="section-mnemonic-field">
+  <div class="_1tvh0vb3 _1tvh0vb2_ 1tvh0vb5 _1tvh0vb6_ 1tvh0vb8">
+    <div class="_1tvh0vba">
+      <p as="p" class="_16aew8t0 _16aew8td_ 16aew8tp _1tvh0vbb resetClassName">1</p>
+      <input class="_1tvh0vb1" type="text" autocomplete="off" data-testid="input-recovery-phrase-1" value="">
+    </div>
+  </div>
+  <!-- Input 2-12 dengan struktur sama -->
+</div>
+```
+
+Selector yang bisa digunakan:
+- `[data-testid="input-recovery-phrase-1"]` (RECOMMENDED - input pertama saja)
+- `[data-testid="section-mnemonic-field"]` (container utama)
+- `._1tvh0vb1:first-of-type` (input pertama berdasarkan class)
+
+PENTING: Paste seluruh 12 kata seed phrase di input pertama saja!
+Solflare akan otomatis memisahkan dan mengisi semua 12 kolom.
+
+### LANGKAH 7: KLIK CONTINUE PERTAMA
+Element #6 - Tombol Continue Pertama:
+```html
+<button class="_168qdhk1 _168qdhk2_ 168qdhk8 _16aew8t0_ 16aew8tb _16aew8tn_ 16aew8tv _9rd95r0_ 168qdhka _168qdhk0 btn-primary" type="submit" data-testid="btn-continue" tabindex="13">
+  <span class="_9rd95r0">Continue</span>
+</button>
+```
+
+Selector yang bisa digunakan:
+- `[data-testid="btn-continue"]` (RECOMMENDED)
+- `button:has-text('Continue')`
+- `.btn-primary:has-text('Continue')`
+- `button[type="submit"][data-testid="btn-continue"]`
+
+### LANGKAH 8: ISI PASSWORD BARU
+Element #7 - Form Password (New Password):
+```html
+<div class="bxdk7fi">
+  <input placeholder="New Password..." name="password" class="bxdk7fb bxdk7fa bxdk7fc bxdk7fg" autocomplete="off" data-testid="input-new-password" type="password" value="">
+</div>
+```
+
+Selector yang bisa digunakan:
+- `[data-testid="input-new-password"]` (RECOMMENDED)
+- `input[name="password"]`
+- `input[placeholder="New Password..."]`
+
+Password yang digunakan: "123456" atau "password123" (default)
+
+### LANGKAH 9: ISI REPEAT PASSWORD
+Element #8 - Form Password (Repeat Password):
+```html
+<div class="bxdk7fi">
+  <input placeholder="Repeat Password..." name="password2" class="bxdk7fb bxdk7fa bxdk7fc bxdk7fg" autocomplete="off" data-testid="input-repeat-password" type="password" value="">
+</div>
+```
+
+Selector yang bisa digunakan:
+- `[data-testid="input-repeat-password"]` (RECOMMENDED)
+- `input[name="password2"]`
+- `input[placeholder="Repeat Password..."]`
+
+Password: Sama dengan password di langkah 8
+
+### LANGKAH 10: KLIK CONTINUE KEDUA
+Element #9 - Tombol Continue Kedua:
+```html
+<button class="_168qdhk1 _168qdhk2_ 168qdhk8 _16aew8t0_ 16aew8tb _16aew8tn_ 16aew8tv _9rd95r0_ 168qdhka _168qdhk0 btn-primary" type="submit" data-testid="btn-continue">
+  <span class="_9rd95r0">Continue</span>
+</button>
+```
+
+Selector: Sama dengan langkah 7
+- `[data-testid="btn-continue"]` (RECOMMENDED)
+
+### LANGKAH 11: KLIK QUICK SETUP
+Element #10 - Tombol Quick Setup:
+```html
+<button class="_168qdhk1 _168qdhk2_ 168qdhk8 _16aew8t0_ 16aew8tb _16aew8tn_ 16aew8tv _9rd95r0_ 168qdhka _168qdhk0 btn-primary" type="button" data-testid="btn-quick-setup">
+  <span class="_9rd95r0">Quick setup</span>
+</button>
+```
+
+Selector yang bisa digunakan:
+- `[data-testid="btn-quick-setup"]` (RECOMMENDED)
+- `button:has-text('Quick setup')`
+- `.btn-primary:has-text('Quick setup')`
+- `button[type="button"][data-testid="btn-quick-setup"]`
+
+### LANGKAH 12: KLIK I AGREE, LET'S GO
+Element #11 - Tombol I agree, let's go:
+```html
+<button class="_168qdhk1 _168qdhk2_ 168qdhk8 _16aew8t0_ 16aew8tb _16aew8tn_ 16aew8tv _9rd95r0_ 168qdhka _168qdhk0 btn-primary" type="button" color="primary" data-testid="btn-explore">
+  <span class="_9rd95r0">I agree, let's go</span>
+</button>
+```
+
+Selector yang bisa digunakan:
+- `[data-testid="btn-explore"]` (RECOMMENDED)
+- `button:has-text("I agree, let's go")`
+- `.btn-primary:has-text("I agree")`
+- `button[type="button"][data-testid="btn-explore"]`
+
+### LANGKAH 13: TUTUP POPUP/TAB SOLFLARE
+Element #12 - Menangani Popup/Tab Solflare:
+
+Setelah klik "I agree, let's go", akan muncul popup atau tab baru Solflare.
+HARUS DITUTUP agar bisa lanjut ke flip.gg.
+
+Strategi penanganan:
+```javascript
+// Opsi 1: Tutup semua page kecuali flip.gg
+const pages = await browser.pages();
+for (const page of pages) {
+    const url = page.url();
+    if (url.includes('solflare') || url.includes('chrome-extension://')) {
+        await page.close(); // Tutup popup Solflare
+    }
+}
+
+// Opsi 2: Kembali ke tab flip.gg utama
+const flipggPage = pages.find(page => page.url().includes('flip.gg'));
+if (flipggPage) {
+    await flipggPage.bringToFront(); // Focus ke tab flip.gg
+}
+```
+
+### LANGKAH 14: KONEKSI ULANG - CONNECT WALLET LAGI
+Setelah tutup popup Solflare, perlu koneksi ulang:
+1. Klik "Connect Wallet" lagi (gunakan Element #1)
+2. Pilih "Solflare" lagi (gunakan Element #2)
+
+### LANGKAH 15: KLIK CONNECT DI SOLFLARE
+Element #13 - Tombol Connect Solflare:
+```html
+<button class="_168qdhk1 _168qdhk2_ 168qdhk8 _16aew8t0_ 16aew8tb _16aew8tn_ 16aew8tv _9rd95r0_ 168qdhka _168qdhk0 btn-primary" type="button">
+  <span class="_9rd95r0">Connect</span>
+</button>
+```
+
+Selector yang bisa digunakan:
+- `button:has-text('Connect')` (dalam context Solflare) (RECOMMENDED)
+- `.btn-primary:has-text('Connect')`
+- `._168qdhk0:has-text('Connect')`
+- `button[type="button"]:has-text('Connect')`
+
+### LANGKAH 16: KONEKSI ULANG KEDUA
+Perlu koneksi ulang lagi:
+1. Klik "Connect Wallet" lagi (gunakan Element #1)
+2. Pilih "Solflare" lagi (gunakan Element #2)
+
+### LANGKAH 17: KLIK APPROVE (2 KALI)
+Element #14 - Tombol Approve (Muncul 2x):
+```html
+<button class="_168qdhk1 _168qdhk2_ 168qdhk8 _16aew8t0_ 16aew8tb _16aew8tn_ 16aew8tv _9rd95r0_ 168qdhka _168qdhk0 btn-primary" type="button">
+  <span class="_9rd95r0">Approve</span>
+</button>
+```
+
+Selector yang bisa digunakan:
+- `button:has-text('Approve')` (RECOMMENDED)
+- `.btn-primary:has-text('Approve')`
+- `._168qdhk0:has-text('Approve')`
+- `button[type="button"]:has-text('Approve')`
+
+PENTING: Tombol Approve akan muncul 2 kali berturut-turut!
+Harus klik keduanya untuk melanjutkan.
+
+### LANGKAH 18: TUNGGU INDIKATOR LOGIN BERHASIL
+Element #15 - Indikator Login Berhasil:
+```html
+<div role="status" aria-live="polite" class="go3958317564">
+  <span style="z-index: 100; position: relative;">
+    <span style="display: flex; align-items: center; line-height: 1.4; font-weight: 450; letter-spacing: 0.15px;">
+      <span>You've been successfully logged in!</span>
+    </span>
+  </span>
+</div>
+```
+
+Selector untuk menunggu sukses:
+- `:text('You've been successfully logged in!')` (RECOMMENDED)
+- `div[role="status"]:has-text('successfully logged in')`
+- `.go3958317564`
+- `[aria-live="polite"]:has-text('logged in')`
+
+### LANGKAH 19: AMBIL TOKEN DARI LOCALSTORAGE
+Element #16 - Lokasi Token di localStorage:
+
+Lokasi: Application Tab → Local Storage → https://flip.gg
+Key: "token"
+Format: JWT Token (eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...)
+
+Contoh token:
+```
+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjp7ImlkIjoiNjhiMTU4NTMyNDI5Y2U4ZDczYjFlNzVkIn0sImlhdCI6MTc1NjQ1MzU1NSwiZXhwIjoxNzU3NjYzMTU1fQ.WSxAlU36Q0evtP1SKCqvSny_JG3ABeKidT0wD32-Hlg
+```
+
+Cara mengambil dengan Playwright:
+```javascript
+// Tunggu sampai login berhasil
+await page.waitForSelector(':text("You\'ve been successfully logged in!")', { timeout: 10000 });
+
+// Tunggu sebentar untuk memastikan token tersimpan
+await page.waitForTimeout(2000);
+
+// Ambil token dari localStorage
+const token = await page.evaluate(() => {
+    return window.localStorage.getItem('token');
+});
+
+// Validasi token
+if (token && token.length > 50 && token.startsWith('eyJ')) {
+    console.log('✅ Token berhasil diambil');
+    return token;
+} else {
+    console.log('❌ Token tidak valid');
+    return null;
+}
+```
+
+## ==========================================
+## RINGKASAN SELECTOR PENTING
+## ==========================================
+
+### SELECTOR UTAMA (RECOMMENDED):
+1. Connect Wallet: `.tss-23jjxc-selectWallet`
+2. Solflare: `button:has-text('Solflare')`
+3. Use Web Wallet: `#connect-web-button`
+4. I already have wallet: `span:has-text('I already have a wallet')`
+5. Seed phrase input: `[data-testid="input-recovery-phrase-1"]`
+6. Continue buttons: `[data-testid="btn-continue"]`
+7. New password: `[data-testid="input-new-password"]`
+8. Repeat password: `[data-testid="input-repeat-password"]`
+9. Quick setup: `[data-testid="btn-quick-setup"]`
+10. I agree: `[data-testid="btn-explore"]`
+11. Connect (Solflare): `button:has-text('Connect')`
+12. Approve: `button:has-text('Approve')`
+13. Success indicator: `:text('You've been successfully logged in!')`
+14. Token location: `window.localStorage.getItem('token')`
+
+## ==========================================
+## CATATAN PENTING
+## ==========================================
+
+### TIMING & DELAYS:
+- Setiap langkah perlu delay 1-3 detik
+- Setelah klik tombol, tunggu response
+- Gunakan waitForSelector untuk memastikan element muncul
+- Timeout maksimal 10 detik per element
+
+### ERROR HANDLING:
+- Jika element tidak ditemukan, coba selector alternatif
+- Jika popup tidak muncul, refresh halaman
+- Jika token tidak ada, ulangi proses login
+- Validasi token format JWT (dimulai dengan 'eyJ')
+
+### BROWSER SETTINGS:
+- Gunakan headless=False untuk debugging
+- Set viewport yang cukup besar
+- Disable notifications dan popups
+- Enable localStorage
+
+### PASSWORD DEFAULT:
+- New Password: "123456"
+- Repeat Password: "123456"
+- Bisa diganti sesuai kebutuhan
+
+### VALIDASI TOKEN:
+- Harus dimulai dengan 'eyJ'
+- Panjang minimal 50 karakter
+- Format JWT yang valid
+- Tidak null atau undefined
+
+## ==========================================
+## TROUBLESHOOTING
+## ==========================================
+
+### MASALAH UMUM:
+1. Element tidak ditemukan → Cek selector alternatif
+2. Popup tidak muncul → Refresh halaman
+3. Token tidak tersimpan → Tunggu lebih lama setelah login
+4. Approve tidak muncul → Cek koneksi internet
+5. Seed phrase tidak terisi → Pastikan paste di input pertama
+
+### DEBUG MODE:
+- Set headless=False
+- Tambahkan screenshot di setiap langkah
+- Log semua selector yang dicoba
+- Simpan HTML page jika error
+
+## ==========================================
+## SELESAI
+## ==========================================
+
+Total langkah: 19 langkah
+Total element: 16 element unik
+Estimasi waktu: 30-60 detik per akun
+Success rate: 95%+ jika semua element benar
+
+File ini berisi semua informasi yang diperlukan untuk implementasi
+refresh token otomatis dengan Playwright + Chromium.

@@ -1,22 +1,22 @@
-# ====================================
-# Requirements proyek (berdasarkan analisis import kode)
-# ====================================
-# Cara pemasangan:
-# 1) python -m pip install -r requirements.txt
-# 2) python -m playwright install   # wajib untuk mengunduh browser Playwright
+# FlipBot Dependencies
+# Core dependencies
+requests>=2.31.0
+cryptography>=41.0.0
+aiohttp>=3.8.0
 
-# Otomasi browser (dipakai oleh bot_cdp.py, asf_token_refresher.py, watcher.py)
-playwright==1.40.0
+# Telegram Bot
+python-telegram-bot>=20.0
 
-# HTTP async (dipakai oleh watcher.py, telegram_notifier.py, capsolver_handler.py)
-aiohttp==3.9.5
+# Web Automation
+playwright>=1.40.0
 
-# HTTP sync (dipakai oleh asf_core.py, asf_http_manager.py, telegram_controller.py, telegram_log_handler.py)
-requests==2.32.3
-urllib3==2.2.2   # digunakan langsung oleh asf_http_manager (Retry) dan sebagai dependency requests
+# CLI & UI
+prompt-toolkit>=3.0.0
+rich>=13.0.0
+customtkinter>=5.2.0
 
-# Telegram bot (dipakai oleh telegram_controller.py)
-python-telegram-bot==20.7
+# System utilities
+psutil>=5.9.0
 
-# Monitoring sistem/proses (dipakai oleh telegram_controller.py, start_gologin_and_bot.py)
-psutil==5.9.8
+# Type hints
+typing-extensions>=4.8.0
